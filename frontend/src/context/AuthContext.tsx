@@ -17,6 +17,7 @@ interface AuthContextType {
   isAuthenticated: boolean;
   isLoading: boolean;
   login: (token: string, user: User) => void;
+  updateUser: (newUser: User, newToken?: string) => void;
   logout: () => void;
   hasRole: (...roles: string[]) => boolean;
   hasPermission: (permission: string) => boolean;
@@ -60,6 +61,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     localStorage.setItem("nsupure_user", JSON.stringify(newUser));
   };
 
+  const updateUser = (newUser: User, newToken?: string) => {
+    setUser(newUser);
+    localStorage.setItem("nsupure_user", JSON.stringify(newUser));
+    if (newToken) {
+      setToken(newToken);
+      localStorage.setItem("nsupure_token", newToken);
+    }
+  };
+
   const logout = () => {
     setToken(null);
     setUser(null);
@@ -87,6 +97,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isAuthenticated: !!token && !!user,
         isLoading,
         login,
+        updateUser,
         logout,
         hasRole,
         hasPermission,

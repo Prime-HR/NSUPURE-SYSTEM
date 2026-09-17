@@ -123,15 +123,18 @@ export async function cleanDatabase() {
   }
 
   // Primary Owner
+  const defaultOwnerUsername = (process.env.INITIAL_OWNER_USERNAME || "owner").toLowerCase();
   const defaultPassword = process.env.INITIAL_OWNER_PASSWORD || "Nsupure2025!";
+  const defaultEmail = process.env.INITIAL_OWNER_EMAIL || "owner@nsupure.com";
+  const defaultFullName = process.env.INITIAL_OWNER_NAME || "Nsupure Managing Proprietor";
   const passwordHash = await bcrypt.hash(defaultPassword, 12);
   const ownerUser = await prisma.user.upsert({
-    where: { username: "owner" },
-    update: { passwordHash, status: "ACTIVE" },
+    where: { username: defaultOwnerUsername },
+    update: { passwordHash, fullName: defaultFullName, email: defaultEmail, status: "ACTIVE" },
     create: {
-      username: "owner",
-      email: "owner@nsupure.com",
-      fullName: "Nsupure Managing Proprietor",
+      username: defaultOwnerUsername,
+      email: defaultEmail,
+      fullName: defaultFullName,
       phone: "+233000000000",
       passwordHash,
       status: "ACTIVE",

@@ -17,6 +17,17 @@ export const changePasswordSchema = z.object({
   newPassword: z.string().min(6, "New password must be at least 6 characters"),
 });
 
+export const updateProfileSchema = z.object({
+  username: z
+    .string()
+    .min(3, "Username must be at least 3 characters")
+    .regex(/^[a-zA-Z0-9_.-]+$/, "Username can only contain alphanumeric characters, underscores, and hyphens")
+    .optional(),
+  fullName: z.string().min(2, "Full name must be at least 2 characters").optional(),
+  email: z.string().email("Valid email is required").optional().or(z.literal("")),
+  phone: z.string().optional(),
+});
+
 export async function login(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const { username, password } = req.body;
@@ -170,6 +181,100 @@ export async function changePassword(req: Request, res: Response, next: NextFunc
   }
 }
 
+export async function updateProfile(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    if (!req.user) {
+      throw new AppError("Unauthorized", 401, "UNAUTHORIZED");
+    }
+
+    const { username, fullName, email, phone } = req.body;
+
+    const user = await prisma.user.findUnique({
+      where: { id: req.user.id },
+      include: {
+        userRoles: {
+          include: { role: true },
+        },
+      },
+    });
+
+    if (!user) {
+      throw new AppError("User not found", 404, "NOT_FOUND");
+    }
+
+    // Verify username uniqueness if changing
+    if (username && username.toLowerCase() !== user.username.toLowerCase()) {
+      const existing = await prisma.user.findUnique({
+        where: { username: username.toLowerCase() },
+      });
+      if (existing) {
+        throw new AppError("Username is already taken by another account", 400, "USERNAME_TAKEN");
+      }
+    }
+
+    // Verify email uniqueness if changing
+    if (email && email.trim().length > 0 && email.trim().toLowerCase() !== user.email?.toLowerCase()) {
+      const existingEmail = await prisma.user.findUnique({
+        where: { email: email.trim().toLowerCase() },
+      });
+      if (existingEmail) {
+        throw new AppError("Email is already registered to another account", 400, "EMAIL_TAKEN");
+      }
+    }
+
+    const updated = await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        ...(username ? { username: username.toLowerCase() } : {}),
+        ...(fullName ? { fullName } : {}),
+        ...(email !== undefined ? { email: email.trim().length > 0 ? email.trim().toLowerCase() : `${user.username}@nsupure.local` } : {}),
+        ...(phone !== undefined ? { phone: phone || null } : {}),
+      },
+    });
+
+    const roles = user.userRoles.map((ur) => ur.role.code);
+
+    const token = jwt.sign(
+      {
+        userId: updated.id,
+        username: updated.username,
+        roles,
+      },
+      ENV.JWT_SECRET,
+      { expiresIn: "7d" }
+    );
+
+    await logAudit({
+      userId: user.id,
+      action: "UPDATE",
+      module: "auth",
+      recordId: user.id,
+      oldValue: { username: user.username, fullName: user.fullName },
+      newValue: { username: updated.username, fullName: updated.fullName },
+      req,
+    });
+
+    res.json({
+      success: true,
+      data: {
+        token,
+        user: {
+          id: updated.id,
+          username: updated.username,
+          email: updated.email,
+          fullName: updated.fullName,
+          phone: updated.phone,
+          roles,
+        },
+      },
+      message: "Profile updated successfully",
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
 export const createUserSchema = z.object({
   username: z
     .string()
@@ -314,6 +419,7 @@ export async function deleteUser(req: Request, res: Response, next: NextFunction
     const user = await prisma.user.findUnique({
       where: { id },
       include: {
+        userRoles: { include: { role: true } },
         _count: {
           select: { sales: true, productionRuns: true, payments: true },
         },
@@ -325,7 +431,8 @@ export async function deleteUser(req: Request, res: Response, next: NextFunction
     }
 
     // Protect the primary owner account from deletion
-    if (user.username === "owner") {
+    const isOwner = user.userRoles.some((ur) => ur.role.code === "OWNER") || user.username === "owner";
+    if (isOwner) {
       throw new AppError("The primary system owner account cannot be deleted.", 400, "CANNOT_DELETE_OWNER");
     }
 
@@ -393,12 +500,18 @@ export async function toggleUserStatus(req: Request, res: Response, next: NextFu
     const { id } = req.params;
     const { status } = req.body;
 
-    const user = await prisma.user.findUnique({ where: { id } });
+    const user = await prisma.user.findUnique({
+      where: { id },
+      include: {
+        userRoles: { include: { role: true } },
+      },
+    });
     if (!user) {
       throw new AppError("User not found", 404, "NOT_FOUND");
     }
 
-    if (user.username === "owner" && status !== "ACTIVE") {
+    const isOwner = user.userRoles.some((ur) => ur.role.code === "OWNER") || user.username === "owner";
+    if (isOwner && status !== "ACTIVE") {
       throw new AppError("The primary system owner account cannot be deactivated.", 400, "CANNOT_DEACTIVATE_OWNER");
     }
 

@@ -24,18 +24,20 @@ async function main() {
   }
   console.log("System roles created:", Object.keys(createdRoles).length);
 
-  // 2. Seed Default Owner Account
-  const defaultOwnerUsername = "owner";
+  // 2. Seed Initial Owner Account (Customizable via environment variables)
+  const defaultOwnerUsername = (process.env.INITIAL_OWNER_USERNAME || "owner").toLowerCase();
   const defaultPassword = process.env.INITIAL_OWNER_PASSWORD || "Nsupure2025!";
+  const defaultEmail = process.env.INITIAL_OWNER_EMAIL || "owner@nsupure.com";
+  const defaultFullName = process.env.INITIAL_OWNER_NAME || "Nsupure Managing Proprietor";
   const passwordHash = await bcrypt.hash(defaultPassword, 12);
 
   const ownerUser = await prisma.user.upsert({
     where: { username: defaultOwnerUsername },
-    update: { passwordHash },
+    update: { passwordHash, fullName: defaultFullName, email: defaultEmail },
     create: {
       username: defaultOwnerUsername,
-      email: "owner@nsupure.com",
-      fullName: "Nsupure Managing Proprietor",
+      email: defaultEmail,
+      fullName: defaultFullName,
       phone: "+233000000000",
       passwordHash,
       status: "ACTIVE",

@@ -3,12 +3,14 @@ import {
   login,
   getMe,
   changePassword,
+  updateProfile,
   getUsers,
   createUser,
   deleteUser,
   toggleUserStatus,
   loginSchema,
   changePasswordSchema,
+  updateProfileSchema,
   createUserSchema,
 } from "./auth.controller.js";
 import { authenticate } from "../../middleware/auth.js";
@@ -19,6 +21,7 @@ const router = Router();
 
 router.post("/login", validateBody(loginSchema), login);
 router.get("/me", authenticate, getMe);
+router.put("/profile", authenticate, validateBody(updateProfileSchema), updateProfile);
 router.post("/change-password", authenticate, validateBody(changePasswordSchema), changePassword);
 
 // System user management (Owner / Administrator only)

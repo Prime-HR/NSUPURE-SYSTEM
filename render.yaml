@@ -18,6 +18,8 @@ services:
         generateValue: true
       - key: JWT_EXPIRES_IN
         value: 7d
+      - key: INITIAL_OWNER_USERNAME
+        value: owner
       - key: INITIAL_OWNER_PASSWORD
         value: Nsupure2025!
       - key: UPLOAD_DIR
