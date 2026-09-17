@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Factory, CheckCircle, Clock, Droplets, AlertTriangle, Package, ShieldCheck } from "lucide-react";
+import { Factory, CheckCircle, Clock, Droplets, AlertTriangle, Package, ShieldCheck, Send } from "lucide-react";
 import { apiRequest } from "../../services/api.ts";
 
 interface ProductionRun {
@@ -7,6 +7,8 @@ interface ProductionRun {
   runNumber: string;
   date: string;
   shift: string;
+  startTime: string | null;
+  endTime: string | null;
   bagsProduced: number;
   rejectedBags: number;
   goodBags: number;
@@ -22,9 +24,11 @@ export const ProductionPage: React.FC = () => {
   const [runs, setRuns] = useState<ProductionRun[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Form State (< 1 Minute Entry)
-  const [shift, setShift] = useState<"MORNING_8_12" | "AFTERNOON_1_5">("MORNING_8_12");
-  const [machineHours, setMachineHours] = useState<number>(4.0);
+  // Form State (< 1 Minute Entry, 1 to 6 Hours Shifts)
+  const [shift, setShift] = useState<string>("MORNING_6_12");
+  const [startTime, setStartTime] = useState<string>("06:00");
+  const [endTime, setEndTime] = useState<string>("12:00");
+  const [machineHours, setMachineHours] = useState<number>(6.0);
   const [bagsProduced, setBagsProduced] = useState<number>(150);
   const [rejectedBags, setRejectedBags] = useState<number>(2);
   const [openingRawWater, setOpeningRawWater] = useState<number>(1800);
@@ -39,11 +43,84 @@ export const ProductionPage: React.FC = () => {
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [lastRecordedRun, setLastRecordedRun] = useState<{
+    runNumber: string;
+    batchNumber: string;
+    goodBags: number;
+    rejectedBags: number;
+    machineHours: number;
+    startTime: string;
+    endTime: string;
+    shift: string;
+  } | null>(null);
 
   // Calculated variables
   const goodBags = Math.max(0, bagsProduced - rejectedBags);
   const rejectRate = bagsProduced > 0 ? Number(((rejectedBags / bagsProduced) * 100).toFixed(2)) : 0;
   const productionPerHour = machineHours > 0 ? Number((goodBags / machineHours).toFixed(1)) : 0;
+
+  const calculateHoursFromTimes = (start: string, end: string): number => {
+    if (!start || !end) return 6.0;
+    const [sh, sm] = start.split(":").map(Number);
+    const [eh, em] = end.split(":").map(Number);
+    if (isNaN(sh) || isNaN(sm) || isNaN(eh) || isNaN(em)) return 6.0;
+    let diffMinutes = (eh * 60 + em) - (sh * 60 + sm);
+    if (diffMinutes < 0) diffMinutes += 24 * 60;
+    const hours = Number((diffMinutes / 60).toFixed(1));
+    return hours > 0 && hours <= 24 ? hours : 6.0;
+  };
+
+  const handleShiftSelect = (type: string) => {
+    if (type === "MORNING" || type === "MORNING_6_12") {
+      setShift("MORNING_6_12");
+      setStartTime("06:00");
+      setEndTime("12:00");
+      setMachineHours(6.0);
+    } else if (type === "AFTERNOON" || type === "AFTERNOON_12_6") {
+      setShift("AFTERNOON_12_6");
+      setStartTime("12:00");
+      setEndTime("18:00");
+      setMachineHours(6.0);
+    } else {
+      setShift("CUSTOM_1_6");
+    }
+  };
+
+  const sendShiftToWhatsApp = (runTarget?: any) => {
+    const run = runTarget && typeof runTarget === "object" && "runNumber" in runTarget ? runTarget : lastRecordedRun;
+    if (!run) return;
+    const todayStr = new Date().toLocaleDateString("en-GB", {
+      weekday: "short",
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    });
+    const shiftLabel =
+      run.shift === "MORNING_6_12"
+        ? "Morning Shift (6:00 AM – 12:00 PM)"
+        : run.shift === "AFTERNOON_12_6"
+        ? "Afternoon Shift (12:00 PM – 6:00 PM)"
+        : `Custom Shift (${run.startTime} – ${run.endTime})`;
+
+    const text = `🏭 *NSUPURE MINERAL WATER ENTERPRISE*
+📍 *Adumasa Production Facility*
+📅 *Date:* ${todayStr}
+
+⚙️ *SHIFT PRODUCTION REPORT*
+• *Batch No:* ${run.batchNumber}
+• *Shift:* ${shiftLabel}
+• *Start Time:* ${run.startTime}
+• *End Time:* ${run.endTime}
+• *Operating Hours:* ${run.machineHours} hrs
+• *Good Bags:* ${run.goodBags} bags (Stock)
+• *Rejected Bags:* ${run.rejectedBags} bags
+• *Total Produced:* ${run.goodBags + run.rejectedBags} bags
+
+_Sent directly from Nsupure Production Console to Central Admin (0248837001)_`;
+
+    const url = `https://wa.me/233248837001?text=${encodeURIComponent(text)}`;
+    window.open(url, "_blank");
+  };
 
   const fetchRuns = async () => {
     try {
@@ -73,6 +150,8 @@ export const ProductionPage: React.FC = () => {
         method: "POST",
         body: JSON.stringify({
           shift,
+          startTime,
+          endTime,
           machineHours,
           bagsProduced,
           rejectedBags,
@@ -90,6 +169,16 @@ export const ProductionPage: React.FC = () => {
 
       if (res.data) {
         setSuccessMessage(`Logged ${goodBags} good bags. Assigned Batch: ${res.data.batch.batchNumber}`);
+        setLastRecordedRun({
+          runNumber: res.data.run.runNumber,
+          batchNumber: res.data.batch.batchNumber,
+          goodBags,
+          rejectedBags,
+          machineHours,
+          startTime,
+          endTime,
+          shift,
+        });
         fetchRuns();
       }
     } catch (err) {
@@ -120,9 +209,21 @@ export const ProductionPage: React.FC = () => {
       </div>
 
       {successMessage && (
-        <div className="p-4 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs rounded-xl font-bold flex items-center gap-2">
-          <CheckCircle className="w-4 h-4 text-emerald-600" />
-          {successMessage}
+        <div className="p-4 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs rounded-xl font-bold flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm">
+          <div className="flex items-center gap-2">
+            <CheckCircle className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+            <span>{successMessage}</span>
+          </div>
+          {lastRecordedRun && (
+            <button
+              type="button"
+              onClick={sendShiftToWhatsApp}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white rounded-lg text-xs font-black shadow-sm transition shrink-0"
+            >
+              <Send className="w-3.5 h-3.5" />
+              📲 Send Shift to WhatsApp (0248837001)
+            </button>
+          )}
         </div>
       )}
 
@@ -132,33 +233,87 @@ export const ProductionPage: React.FC = () => {
       <form onSubmit={handleSubmit} className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm space-y-4">
         <h3 className="text-sm font-black text-slate-900 uppercase tracking-wider flex items-center gap-2 border-b pb-2">
           <Clock className="w-4 h-4 text-slate-500" />
-          Record Shift Production
+          Record Shift Production (1 to 6 Working Hours)
         </h3>
 
         {/* Shift Selector */}
-        <div className="grid grid-cols-2 gap-3">
-          <button
-            type="button"
-            onClick={() => setShift("MORNING_8_12")}
-            className={`py-3 px-4 rounded-xl text-xs font-bold border transition text-center ${
-              shift === "MORNING_8_12"
-                ? "bg-indigo-600 text-white border-indigo-600 shadow-sm"
-                : "bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200"
-            }`}
-          >
-            Morning Shift (8:00 AM – 12:00 PM)
-          </button>
-          <button
-            type="button"
-            onClick={() => setShift("AFTERNOON_1_5")}
-            className={`py-3 px-4 rounded-xl text-xs font-bold border transition text-center ${
-              shift === "AFTERNOON_1_5"
-                ? "bg-indigo-600 text-white border-indigo-600 shadow-sm"
-                : "bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200"
-            }`}
-          >
-            Afternoon Shift (1:00 PM – 5:00 PM)
-          </button>
+        <div>
+          <label className="block text-xs font-bold text-slate-700 mb-1.5">Select Work Shift (1 to 6 Hours)</label>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+            <button
+              type="button"
+              onClick={() => handleShiftSelect("MORNING_6_12")}
+              className={`py-2.5 px-3 rounded-xl text-xs font-bold border transition text-center ${
+                shift === "MORNING_6_12"
+                  ? "bg-indigo-600 text-white border-indigo-600 shadow-sm"
+                  : "bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200"
+              }`}
+            >
+              ☀️ Morning (6:00 AM – 12:00 PM)
+            </button>
+            <button
+              type="button"
+              onClick={() => handleShiftSelect("AFTERNOON_12_6")}
+              className={`py-2.5 px-3 rounded-xl text-xs font-bold border transition text-center ${
+                shift === "AFTERNOON_12_6"
+                  ? "bg-indigo-600 text-white border-indigo-600 shadow-sm"
+                  : "bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200"
+              }`}
+            >
+              🌤️ Afternoon (12:00 PM – 6:00 PM)
+            </button>
+            <button
+              type="button"
+              onClick={() => handleShiftSelect("CUSTOM_1_6")}
+              className={`py-2.5 px-3 rounded-xl text-xs font-bold border transition text-center ${
+                shift === "CUSTOM_1_6"
+                  ? "bg-indigo-600 text-white border-indigo-600 shadow-sm"
+                  : "bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200"
+              }`}
+            >
+              ⏱️ Custom (1 to 6 Hours)
+            </button>
+          </div>
+        </div>
+
+        {/* Start Time & End Time Recording */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-slate-50/80 p-3.5 rounded-xl border border-slate-200/80">
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1.5">
+              <Clock className="w-3.5 h-3.5 text-indigo-600" />
+              Shift Start Time
+            </label>
+            <input
+              type="time"
+              required
+              value={startTime}
+              onChange={(e) => {
+                const val = e.target.value;
+                setStartTime(val);
+                const hrs = calculateHoursFromTimes(val, endTime);
+                setMachineHours(hrs);
+              }}
+              className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-xs font-mono font-bold text-slate-900 focus:ring-2 focus:ring-indigo-500"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1.5">
+              <Clock className="w-3.5 h-3.5 text-indigo-600" />
+              Shift End Time
+            </label>
+            <input
+              type="time"
+              required
+              value={endTime}
+              onChange={(e) => {
+                const val = e.target.value;
+                setEndTime(val);
+                const hrs = calculateHoursFromTimes(startTime, val);
+                setMachineHours(hrs);
+              }}
+              className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-xs font-mono font-bold text-slate-900 focus:ring-2 focus:ring-indigo-500"
+            />
+          </div>
         </div>
 
         {/* Production Numbers */}
@@ -188,17 +343,21 @@ export const ProductionPage: React.FC = () => {
             />
           </div>
           <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1">Machine Operating Hours</label>
+            <label className="block text-xs font-bold text-slate-700 mb-1">
+              Working Hours (1 – 6 hrs)
+            </label>
             <input
               type="number"
               inputMode="decimal"
-              step="0.5"
+              step="0.1"
               min="0.5"
+              max="6.0"
               required
               value={machineHours}
-              onChange={(e) => setMachineHours(parseFloat(e.target.value) || 4.0)}
+              onChange={(e) => setMachineHours(parseFloat(e.target.value) || 6.0)}
               className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-sm font-bold text-slate-900 focus:ring-2 focus:ring-indigo-500"
             />
+            <span className="text-[10px] text-slate-500 font-medium">Computed from Start & End Time</span>
           </div>
         </div>
 
@@ -309,6 +468,8 @@ export const ProductionPage: React.FC = () => {
                 <th className="p-3">Run ID</th>
                 <th className="p-3">Batch Number</th>
                 <th className="p-3">Date & Shift</th>
+                <th className="p-3">Time Window</th>
+                <th className="p-3 text-right">Hours</th>
                 <th className="p-3 text-right">Produced</th>
                 <th className="p-3 text-right">Rejects</th>
                 <th className="p-3 text-right">Good Bags</th>
@@ -319,11 +480,11 @@ export const ProductionPage: React.FC = () => {
             <tbody className="divide-y divide-slate-100">
               {loading ? (
                 <tr>
-                  <td colSpan={8} className="p-4 text-center text-slate-400">Loading runs...</td>
+                  <td colSpan={10} className="p-4 text-center text-slate-400">Loading runs...</td>
                 </tr>
               ) : runs.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="p-4 text-center text-slate-400">No production runs recorded yet.</td>
+                  <td colSpan={10} className="p-4 text-center text-slate-400">No production runs recorded yet.</td>
                 </tr>
               ) : (
                 runs.map((r) => (
@@ -333,7 +494,23 @@ export const ProductionPage: React.FC = () => {
                       {r.batches[0]?.batchNumber || "—"}
                     </td>
                     <td className="p-3 text-slate-700">
-                      {new Date(r.date).toLocaleDateString("en-GB")} ({r.shift === "MORNING_8_12" ? "Morning" : "Afternoon"})
+                      {new Date(r.date).toLocaleDateString("en-GB")}{" "}
+                      <span className="font-semibold text-slate-900">
+                        ({r.shift.includes("MORNING") ? "Morning" : r.shift.includes("AFTERNOON") ? "Afternoon" : "Custom"})
+                      </span>
+                    </td>
+                    <td className="p-3 font-mono text-xs text-slate-600">
+                      {r.startTime && r.endTime ? (
+                        <span>
+                          {new Date(r.startTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} –{" "}
+                          {new Date(r.endTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                        </span>
+                      ) : (
+                        <span>—</span>
+                      )}
+                    </td>
+                    <td className="p-3 text-right font-mono font-bold text-slate-700">
+                      {r.machineHours ? `${r.machineHours}h` : "—"}
                     </td>
                     <td className="p-3 text-right text-slate-700">{r.bagsProduced}</td>
                     <td className="p-3 text-right text-red-600 font-medium">{r.rejectedBags}</td>

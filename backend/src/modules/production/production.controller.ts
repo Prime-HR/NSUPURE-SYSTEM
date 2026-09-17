@@ -10,11 +10,11 @@ import {
 } from "../../utils/calculations.js";
 
 export const createProductionRunSchema = z.object({
-  shift: z.enum(["MORNING_8_12", "AFTERNOON_1_5"]).default("MORNING_8_12"),
+  shift: z.string().default("MORNING_6_12"),
   productId: z.string().uuid().optional(),
   startTime: z.string().optional(),
   endTime: z.string().optional(),
-  machineHours: z.number().positive("Machine operating hours must be positive").default(4.0),
+  machineHours: z.number().positive("Machine operating hours must be positive").default(6.0),
   openingRawWaterLevel: z.number().nonnegative().optional(),
   closingRawWaterLevel: z.number().nonnegative().optional(),
   openingPurifiedWaterLevel: z.number().nonnegative().optional(),
@@ -83,14 +83,47 @@ export async function createProductionRun(req: Request, res: Response, next: Nex
       productId = defaultProd.id;
     }
 
-    // Mathematical calculations
-    const goodBags = calculateGoodBags(data.bagsProduced, data.rejectedBags);
-    const rejectRatePct = calculateRejectRate(data.bagsProduced, data.rejectedBags);
-    const productionPerHour = calculateProductionPerHour(goodBags, data.machineHours);
-
     // Today's date string YYYY-MM-DD
     const today = new Date();
     const dateStr = today.toISOString().split("T")[0];
+
+    // Parse start and end times safely (supports HH:MM or ISO strings)
+    function parseTimeString(timeStr?: string, baseDate: Date = new Date()): Date | null {
+      if (!timeStr || typeof timeStr !== "string") return null;
+      const trimmed = timeStr.trim();
+      if (!trimmed) return null;
+      if (trimmed.includes("T") || (trimmed.includes("-") && trimmed.length > 10)) {
+        const d = new Date(trimmed);
+        return isNaN(d.getTime()) ? null : d;
+      }
+      const parts = trimmed.split(":");
+      if (parts.length >= 2) {
+        const d = new Date(baseDate);
+        const hours = parseInt(parts[0], 10);
+        const minutes = parseInt(parts[1], 10);
+        if (!isNaN(hours) && !isNaN(minutes)) {
+          d.setHours(hours, minutes, 0, 0);
+          return d;
+        }
+      }
+      return null;
+    }
+
+    const startTime = parseTimeString(data.startTime, today);
+    const endTime = parseTimeString(data.endTime, today);
+
+    let machineHours = data.machineHours;
+    if (startTime && endTime && endTime.getTime() > startTime.getTime()) {
+      const calculatedHours = Number(((endTime.getTime() - startTime.getTime()) / (1000 * 60 * 60)).toFixed(2));
+      if (calculatedHours > 0 && calculatedHours <= 24) {
+        machineHours = calculatedHours;
+      }
+    }
+
+    // Mathematical calculations
+    const goodBags = calculateGoodBags(data.bagsProduced, data.rejectedBags);
+    const rejectRatePct = calculateRejectRate(data.bagsProduced, data.rejectedBags);
+    const productionPerHour = calculateProductionPerHour(goodBags, machineHours);
 
     // Count today's runs for sequential batch number: NSP-YYYY-MM-DD-001
     const todayRunsCount = await prisma.productionRun.count({
@@ -119,9 +152,9 @@ export async function createProductionRun(req: Request, res: Response, next: Nex
           shift: data.shift,
           operatorId: req.user?.id || null,
           productId,
-          startTime: data.startTime ? new Date(data.startTime) : null,
-          endTime: data.endTime ? new Date(data.endTime) : null,
-          machineHours: data.machineHours,
+          startTime,
+          endTime,
+          machineHours,
           openingRawWaterLevel: data.openingRawWaterLevel || null,
           closingRawWaterLevel: data.closingRawWaterLevel || null,
           openingPurifiedWaterLevel: data.openingPurifiedWaterLevel || null,

@@ -29,10 +29,12 @@ import {
   User as UserIcon,
   Save,
   Check,
+  Send,
 } from "lucide-react";
 import { useAuth } from "../../context/AuthContext.tsx";
 import { useOffline } from "../../context/OfflineContext.tsx";
 import { apiRequest } from "../../services/api.ts";
+import { WhatsAppModal } from "../common/WhatsAppModal.tsx";
 
 export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user, logout, hasRole, updateUser } = useAuth();
@@ -41,6 +43,7 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
   const navigate = useNavigate();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [whatsAppModalOpen, setWhatsAppModalOpen] = useState(false);
 
   // Account & Security Profile Modal State
   const [profileModalOpen, setProfileModalOpen] = useState(false);
@@ -288,6 +291,18 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
           })}
         </nav>
 
+        {/* Central WhatsApp Dispatch Button (0248837001) */}
+        <div className="p-3 border-t border-slate-800 bg-slate-900/60">
+          <button
+            type="button"
+            onClick={() => setWhatsAppModalOpen(true)}
+            className="w-full py-2.5 px-3 bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 hover:border-emerald-500/60 text-emerald-300 hover:text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-2 group shadow-sm"
+          >
+            <Send className="w-3.5 h-3.5 text-emerald-400 group-hover:scale-110 transition-transform" />
+            <span>📲 WhatsApp (0248837001)</span>
+          </button>
+        </div>
+
         {/* Network & Offline Status Banner (Section 64) */}
         <div className="p-3 border-t border-slate-800 bg-slate-950/50">
           <div className="flex items-center justify-between text-xs mb-2">
@@ -369,6 +384,14 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
         </div>
 
         <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setWhatsAppModalOpen(true)}
+            className="text-[11px] font-black bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white px-2.5 py-1 rounded-lg flex items-center gap-1 shadow-sm transition"
+          >
+            <Send className="w-3 h-3" />
+            <span>WhatsApp</span>
+          </button>
           <span
             className={`text-[10px] px-2 py-0.5 rounded font-bold ${
               status === "ONLINE"
@@ -390,6 +413,18 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
       {/* Mobile Drawer */}
       {mobileMenuOpen && (
         <div className="md:hidden fixed inset-0 top-14 z-30 bg-slate-950/95 backdrop-blur text-white flex flex-col p-4 overflow-y-auto">
+          <button
+            type="button"
+            onClick={() => {
+              setMobileMenuOpen(false);
+              setWhatsAppModalOpen(true);
+            }}
+            className="w-full mb-3 py-3 px-4 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white rounded-xl text-xs font-black flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/30 transition"
+          >
+            <Send className="w-4 h-4" />
+            <span>📲 Send Data to WhatsApp (0248837001)</span>
+          </button>
+
           <form onSubmit={handleSearchSubmit} className="relative mb-4">
             <Search className="w-4 h-4 absolute left-3 top-3 text-slate-400" />
             <input
@@ -724,6 +759,12 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
           </div>
         </div>
       )}
+
+      {/* Central WhatsApp Dispatch Modal (0248837001) */}
+      <WhatsAppModal
+        isOpen={whatsAppModalOpen}
+        onClose={() => setWhatsAppModalOpen(false)}
+      />
     </div>
   );
 };

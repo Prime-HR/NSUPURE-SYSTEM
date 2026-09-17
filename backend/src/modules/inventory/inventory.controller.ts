@@ -6,19 +6,10 @@ import { logAudit } from "../../middleware/audit.js";
 import { calculateClosingStock, roundCurrency } from "../../utils/calculations.js";
 
 export const createItemSchema = z.object({
-  itemCode: z.string().min(2),
-  name: z.string().min(2),
-  category: z.enum([
-    "SACHET_FILM",
-    "OUTER_BAGS",
-    "CHEMICALS",
-    "FILTERS",
-    "CLEANING",
-    "FUEL",
-    "SPARE_PARTS",
-    "OTHER",
-  ]),
-  unit: z.enum(["ROLL", "BUNDLE", "KG", "LITRE", "PIECE"]),
+  itemCode: z.string().optional().or(z.literal("")),
+  name: z.string().min(2, "Material name must be at least 2 characters"),
+  category: z.string().default("OTHER"),
+  unit: z.string().default("PIECE"),
   openingStock: z.number().nonnegative().default(0.0),
   reorderLevel: z.number().nonnegative().default(10.0),
   unitCost: z.number().nonnegative().default(0.0),
@@ -103,23 +94,30 @@ export async function createInventoryItem(req: Request, res: Response, next: Nex
   try {
     const data = req.body;
 
+    let itemCode = data.itemCode?.trim().toUpperCase();
+    if (!itemCode) {
+      const count = await prisma.inventoryItem.count();
+      const rawCategory = (data.category || "RAW").replace(/[^a-zA-Z]/g, "").slice(0, 3).toUpperCase();
+      itemCode = `RM-${rawCategory || "RAW"}-${String(count + 1).padStart(3, "0")}`;
+    }
+
     const existing = await prisma.inventoryItem.findUnique({
-      where: { itemCode: data.itemCode },
+      where: { itemCode },
     });
     if (existing) {
-      throw new AppError("Item code already exists", 400, "DUPLICATE_CODE");
+      throw new AppError(`Item code "${itemCode}" already exists. Please choose a different code.`, 400, "DUPLICATE_CODE");
     }
 
     const item = await prisma.inventoryItem.create({
       data: {
-        itemCode: data.itemCode,
-        name: data.name,
-        category: data.category,
-        unit: data.unit,
-        openingStock: data.openingStock,
-        currentStock: data.openingStock,
-        reorderLevel: data.reorderLevel,
-        unitCost: data.unitCost,
+        itemCode,
+        name: data.name.trim(),
+        category: data.category || "OTHER",
+        unit: data.unit || "PIECE",
+        openingStock: Number(data.openingStock) || 0.0,
+        currentStock: Number(data.openingStock) || 0.0,
+        reorderLevel: Number(data.reorderLevel) || 10.0,
+        unitCost: Number(data.unitCost) || 0.0,
         supplierId: data.supplierId || null,
         storageLocation: data.storageLocation || null,
         notes: data.notes || null,
