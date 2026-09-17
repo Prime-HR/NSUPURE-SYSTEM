@@ -8,10 +8,12 @@ import {
   createUser,
   deleteUser,
   toggleUserStatus,
+  adminResetUserPassword,
   loginSchema,
   changePasswordSchema,
   updateProfileSchema,
   createUserSchema,
+  adminResetPasswordSchema,
 } from "./auth.controller.js";
 import { authenticate } from "../../middleware/auth.js";
 import { requireRoles } from "../../middleware/rbac.js";
@@ -38,6 +40,13 @@ router.put(
   authenticate,
   requireRoles("OWNER", "ADMINISTRATOR"),
   toggleUserStatus
+);
+router.put(
+  "/users/:id/password",
+  authenticate,
+  requireRoles("OWNER", "ADMINISTRATOR"),
+  validateBody(adminResetPasswordSchema),
+  adminResetUserPassword
 );
 router.delete(
   "/users/:id",

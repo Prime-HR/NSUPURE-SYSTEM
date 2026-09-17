@@ -5,8 +5,8 @@ import { apiRequest } from "../../services/api.ts";
 import { useAuth } from "../../context/AuthContext.tsx";
 
 export const LoginPage: React.FC = () => {
-  const [username, setUsername] = useState("owner");
-  const [password, setPassword] = useState("Nsupure2025!");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -18,10 +18,12 @@ export const LoginPage: React.FC = () => {
     setLoading(true);
     setError(null);
 
+    const cleanUsername = username.trim().toLowerCase();
+
     try {
       const res = await apiRequest<{ token: string; user: any }>("/auth/login", {
         method: "POST",
-        body: JSON.stringify({ username, password }),
+        body: JSON.stringify({ username: cleanUsername, password }),
       });
 
       if (res.data?.token && res.data?.user) {
@@ -66,6 +68,10 @@ export const LoginPage: React.FC = () => {
               <input
                 type="text"
                 required
+                placeholder="Enter username or email"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-10 pr-3 py-2.5 text-xs text-slate-900 font-medium focus:ring-2 focus:ring-sky-500 focus:outline-none"
@@ -80,6 +86,7 @@ export const LoginPage: React.FC = () => {
               <input
                 type="password"
                 required
+                placeholder="Enter password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-10 pr-3 py-2.5 text-xs text-slate-900 font-medium focus:ring-2 focus:ring-sky-500 focus:outline-none"
@@ -97,8 +104,8 @@ export const LoginPage: React.FC = () => {
         </form>
 
         <div className="pt-2 text-center border-t border-slate-100">
-          <p className="text-[11px] text-slate-400">
-            Initial default administrator: <span className="font-mono text-slate-600 font-bold">owner</span>
+          <p className="text-[11px] text-slate-400 font-medium">
+            Authorized Personnel Only • Adumasa Production Facility
           </p>
         </div>
       </div>

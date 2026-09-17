@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { UserCheck, Plus, CheckCircle, Clock, Shield, Key, X, DollarSign, Users, Trash2, UserX, AlertTriangle } from "lucide-react";
+import { UserCheck, Plus, CheckCircle, Clock, Shield, Key, KeyRound, X, DollarSign, Users, Trash2, UserX, AlertTriangle } from "lucide-react";
 import { apiRequest } from "../../services/api.ts";
 
 interface Employee {
@@ -53,6 +53,11 @@ export const StaffPage: React.FC = () => {
   // Modal States
   const [showAddStaffModal, setShowAddStaffModal] = useState(false);
   const [showAddUserModal, setShowAddUserModal] = useState(false);
+  const [resetModalUser, setResetModalUser] = useState<SystemUser | null>(null);
+  const [newStaffPassword, setNewStaffPassword] = useState("");
+  const [resetSubmitting, setResetSubmitting] = useState(false);
+  const [resetError, setResetError] = useState<string | null>(null);
+  const [resetSuccess, setResetSuccess] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [modalError, setModalError] = useState<string | null>(null);
 
@@ -272,6 +277,10 @@ export const StaffPage: React.FC = () => {
       alert("The primary owner account cannot be deactivated.");
       return;
     }
+    const action = user.status === "ACTIVE" ? "suspend login access for" : "reactivate login access for";
+    if (!confirm(`Are you sure you want to ${action} account "${user.username}" (${user.fullName})?`)) {
+      return;
+    }
     const newStatus = user.status === "ACTIVE" ? "SUSPENDED" : "ACTIVE";
     try {
       await apiRequest(`/auth/users/${user.id}/status`, {
@@ -281,6 +290,35 @@ export const StaffPage: React.FC = () => {
       fetchAllData();
     } catch (err) {
       alert((err as Error).message || "Failed to update user status");
+    }
+  };
+
+  const handleResetPasswordSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!resetModalUser) return;
+    if (newStaffPassword.length < 6) {
+      setResetError("New password must be at least 6 characters");
+      return;
+    }
+    setResetSubmitting(true);
+    setResetError(null);
+    setResetSuccess(null);
+
+    try {
+      const res = await apiRequest<{ message: string }>(`/auth/users/${resetModalUser.id}/password`, {
+        method: "PUT",
+        body: JSON.stringify({ newPassword: newStaffPassword }),
+      });
+      setResetSuccess(res.message || `Password for ${resetModalUser.username} was reset successfully!`);
+      setTimeout(() => {
+        setResetModalUser(null);
+        setNewStaffPassword("");
+        setResetSuccess(null);
+      }, 1500);
+    } catch (err: any) {
+      setResetError(err.message || "Failed to reset password");
+    } finally {
+      setResetSubmitting(false);
     }
   };
 
@@ -527,6 +565,7 @@ export const StaffPage: React.FC = () => {
                   <th className="p-3">Full Name</th>
                   <th className="p-3">Assigned Role(s)</th>
                   <th className="p-3">Account Status</th>
+                  <th className="p-3 text-center">Password</th>
                   <th className="p-3 text-center">Access Control</th>
                   <th className="p-3 text-center">Delete</th>
                 </tr>
@@ -560,14 +599,29 @@ export const StaffPage: React.FC = () => {
                     </td>
                     <td className="p-3">
                       <span
-                        className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                        className={`px-2.5 py-0.5 rounded-full text-[10px] font-black tracking-wide ${
                           u.status === "ACTIVE"
-                            ? "bg-emerald-100 text-emerald-800"
-                            : "bg-red-100 text-red-800"
+                            ? "bg-emerald-100 text-emerald-800 border border-emerald-200"
+                            : "bg-rose-100 text-rose-800 border border-rose-200"
                         }`}
                       >
                         {u.status}
                       </span>
+                    </td>
+                    <td className="p-3 text-center">
+                      <button
+                        onClick={() => {
+                          setResetModalUser(u);
+                          setNewStaffPassword("");
+                          setResetError(null);
+                          setResetSuccess(null);
+                        }}
+                        title={`Reset password for ${u.username}`}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 transition"
+                      >
+                        <KeyRound className="w-3.5 h-3.5" />
+                        Reset
+                      </button>
                     </td>
                     <td className="p-3 text-center">
                       {u.username !== "owner" ? (
@@ -575,11 +629,11 @@ export const StaffPage: React.FC = () => {
                           onClick={() => handleToggleUserStatus(u)}
                           className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition ${
                             u.status === "ACTIVE"
-                              ? "bg-amber-50 hover:bg-amber-100 text-amber-800"
-                              : "bg-emerald-50 hover:bg-emerald-100 text-emerald-800"
+                              ? "bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200"
+                              : "bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm"
                           }`}
                         >
-                          {u.status === "ACTIVE" ? "Suspend Login" : "Activate Login"}
+                          {u.status === "ACTIVE" ? "Suspend Access" : "Activate Access"}
                         </button>
                       ) : (
                         <span className="text-slate-400 text-[10px] font-bold">Primary Owner</span>
@@ -893,6 +947,80 @@ export const StaffPage: React.FC = () => {
                   className="flex-1 px-4 py-2 text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 rounded-xl shadow-sm transition disabled:opacity-50"
                 >
                   {submitting ? "Creating..." : "Create Account"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 3: RESET STAFF PASSWORD */}
+      {resetModalUser && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-100 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex justify-between items-center pb-3 border-b border-slate-100">
+              <h3 className="font-black text-base text-slate-900 flex items-center gap-2">
+                <KeyRound className="w-5 h-5 text-indigo-600" />
+                Reset Staff Password
+              </h3>
+              <button
+                onClick={() => setResetModalUser(null)}
+                className="text-slate-400 hover:text-slate-600 p-1"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="mt-3 p-3 bg-slate-50 border border-slate-200 rounded-2xl">
+              <p className="text-xs font-bold text-slate-900">{resetModalUser.fullName}</p>
+              <p className="text-[11px] font-mono text-indigo-700">Username: @{resetModalUser.username}</p>
+              <p className="text-[10px] text-slate-500 mt-1">
+                Roles: {resetModalUser.roles.join(", ")} • Status: {resetModalUser.status}
+              </p>
+            </div>
+
+            {resetError && (
+              <div className="mt-3 p-3 bg-red-50 text-red-700 text-xs rounded-xl font-bold border border-red-200">
+                {resetError}
+              </div>
+            )}
+
+            {resetSuccess && (
+              <div className="mt-3 p-3 bg-emerald-50 text-emerald-700 text-xs rounded-xl font-bold border border-emerald-200 flex items-center gap-2">
+                <CheckCircle className="w-4 h-4" />
+                {resetSuccess}
+              </div>
+            )}
+
+            <form onSubmit={handleResetPasswordSubmit} className="mt-4 space-y-4">
+              <div>
+                <label className="block text-xs font-black text-slate-700 mb-1">
+                  New Password * (Min. 6 characters)
+                </label>
+                <input
+                  type="password"
+                  required
+                  placeholder="Enter new password"
+                  value={newStaffPassword}
+                  onChange={(e) => setNewStaffPassword(e.target.value)}
+                  className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl font-mono focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setResetModalUser(null)}
+                  className="flex-1 px-4 py-2 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={resetSubmitting}
+                  className="flex-1 px-4 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 rounded-xl shadow-sm transition disabled:opacity-50"
+                >
+                  {resetSubmitting ? "Resetting..." : "Save Password"}
                 </button>
               </div>
             </form>

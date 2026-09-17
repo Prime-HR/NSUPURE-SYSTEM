@@ -31,10 +31,17 @@ export const updateProfileSchema = z.object({
 export async function login(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const { username, password } = req.body;
+    const cleanUsername = (username || "").trim().toLowerCase();
+    const rawUsername = (username || "").trim();
 
     const user = await prisma.user.findFirst({
       where: {
-        OR: [{ username }, { email: username }],
+        OR: [
+          { username: cleanUsername },
+          { username: rawUsername },
+          { email: cleanUsername },
+          { email: rawUsername },
+        ],
       },
       include: {
         userRoles: {
@@ -57,8 +64,8 @@ export async function login(req: Request, res: Response, next: NextFunction): Pr
       throw new AppError("Invalid username or password", 401, "INVALID_CREDENTIALS");
     }
 
-    if (user.status !== "ACTIVE") {
-      throw new AppError("Account is suspended or inactive", 403, "ACCOUNT_INACTIVE");
+    if (user.status?.toUpperCase() !== "ACTIVE") {
+      throw new AppError("Account is suspended or inactive. Please contact system owner.", 403, "ACCOUNT_INACTIVE");
     }
 
     const isMatch = await bcrypt.compare(password, user.passwordHash);
@@ -539,4 +546,46 @@ export async function toggleUserStatus(req: Request, res: Response, next: NextFu
     next(error);
   }
 }
+
+export const adminResetPasswordSchema = z.object({
+  newPassword: z.string().min(6, "New password must be at least 6 characters"),
+});
+
+export async function adminResetUserPassword(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const { id } = req.params;
+    const { newPassword } = req.body;
+
+    const user = await prisma.user.findUnique({
+      where: { id },
+    });
+    if (!user) {
+      throw new AppError("User not found", 404, "NOT_FOUND");
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, 12);
+    await prisma.user.update({
+      where: { id },
+      data: { passwordHash },
+    });
+
+    await logAudit({
+      action: "UPDATE",
+      module: "auth",
+      recordId: id,
+      oldValue: { password: "[PROTECTED]" },
+      newValue: { password: "[PASSWORD_RESET_BY_ADMIN]" },
+      req,
+    });
+
+    res.json({
+      success: true,
+      message: `Password for ${user.username} was reset successfully.`,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
 
