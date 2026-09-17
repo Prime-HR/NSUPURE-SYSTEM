@@ -1,0 +1,1017 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// -------------------------------------------------------------
+// 1. IDENTITY & ACCESS MANAGEMENT (RBAC)
+// -------------------------------------------------------------
+
+model User {
+  id            String     @id @default(uuid())
+  username      String     @unique
+  email         String     @unique
+  passwordHash  String
+  fullName      String
+  phone         String?
+  status        String     @default("ACTIVE") // ACTIVE, INACTIVE, SUSPENDED
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  userRoles     UserRole[]
+  auditLogs     AuditLog[]
+  notifications Notification[]
+  sales         Sale[]
+  productionRuns ProductionRun[]
+  payments      Payment[]
+}
+
+model Role {
+  id          String           @id @default(uuid())
+  code        String           @unique // OWNER, ADMINISTRATOR, MANAGER, PRODUCTION_SUPERVISOR, SALES, DRIVER, FINANCE, INVENTORY, VIEWER
+  name        String
+  description String?
+  isSystem    Boolean          @default(true)
+  createdAt   DateTime         @default(now())
+
+  userRoles   UserRole[]
+  permissions RolePermission[]
+}
+
+model Permission {
+  id          String           @id @default(uuid())
+  code        String           @unique // e.g., sales:create, finance:manage
+  module      String           // sales, production, finance, inventory, etc.
+  description String?
+
+  roles       RolePermission[]
+}
+
+model RolePermission {
+  roleId       String
+  permissionId String
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+}
+
+model UserRole {
+  userId String
+  roleId String
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+}
+
+// -------------------------------------------------------------
+// 2. ENTERPRISE SETTINGS & OPENING BALANCES
+// -------------------------------------------------------------
+
+model Setting {
+  key         String   @id
+  value       String
+  category    String   // COMPANY, FACTORY, PRODUCTION, FINANCE, ALERT
+  description String?
+  updatedBy   String?
+  updatedAt   DateTime @updatedAt
+}
+
+model OpeningBalance {
+  id               String   @id @default(uuid())
+  category         String   // CASH, BANK, MOMO, INVENTORY, RECEIVABLES, PAYABLES, LOANS, ASSETS, OWNER_CAPITAL
+  accountOrItemRef String   // ID or name of account/item
+  amount           Float
+  asOfDate         DateTime
+  notes            String?
+  verifiedBy       String?
+  createdAt        DateTime @default(now())
+}
+
+// -------------------------------------------------------------
+// 3. PRODUCTS & PRICING
+// -------------------------------------------------------------
+
+model Product {
+  id             String         @id @default(uuid())
+  code           String         @unique // NSP-500ML
+  name           String         // Nsupure 500ml Sachet Drinking Water
+  unit           String         @default("BAG")
+  sachetsPerBag  Int            @default(30)
+  defaultPrice   Float          @default(7.0)
+  isActive       Boolean        @default(true)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  priceHistory   ProductPrice[]
+  orderItems     OrderItem[]
+  saleItems      SaleItem[]
+  productionRuns ProductionRun[]
+  deliveryItems  DeliveryItem[]
+}
+
+model ProductPrice {
+  id            String    @id @default(uuid())
+  productId     String
+  price         Float
+  effectiveFrom DateTime  @default(now())
+  effectiveTo   DateTime?
+  changedBy     String
+  changeReason  String?
+  approvedBy    String?
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+}
+
+// -------------------------------------------------------------
+// 4. CUSTOMERS & CRM
+// -------------------------------------------------------------
+
+model Customer {
+  id                   String              @id @default(uuid())
+  customerCode         String              @unique
+  businessName         String
+  contactPerson        String?
+  customerType         String              @default("INDIVIDUAL") // WALK_IN, DRINKING_SPOT, CHOP_BAR, SCHOOL, OFFICE, SHOP, WHOLESALER, DISTRIBUTOR, INDIVIDUAL, OTHER
+  phone                String?
+  whatsapp             String?
+  email                String?
+  community            String?             // Bomfa, Peminase, Akwuwie, Wabier, Beposo, Achiase
+  address              String?
+  gpsLocation          String?
+  normalOrderQty       Int?                @default(0)
+  preferredDeliveryDay String?
+  preferredDeliveryTime String?
+  customPrice          Float?
+  creditLimit          Float               @default(0.0)
+  creditTermsDays      Int                 @default(3)
+  currentBalance       Float               @default(0.0) // positive means customer owes money
+  status               String              @default("ACTIVE") // ACTIVE, INACTIVE, BLACKLISTED
+  notes                String?
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+
+  contacts        CustomerContact[]
+  agreements      CustomerAgreement[]
+  orders          Order[]
+  recurringOrders RecurringOrder[]
+  sales           Sale[]
+  payments        Payment[]
+  complaints      Complaint[]
+  deliveries      Delivery[]
+}
+
+model CustomerContact {
+  id         String   @id @default(uuid())
+  customerId String
+  name       String
+  role       String?
+  phone      String
+  email      String?
+  isPrimary  Boolean  @default(false)
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+}
+
+model CustomerAgreement {
+  id            String    @id @default(uuid())
+  customerId    String
+  title         String
+  agreementType String    // CREDIT_TERMS, RECURRING_SUPPLY, EXCLUSIVE_DISTRIBUTION
+  startDate     DateTime
+  endDate       DateTime?
+  terms         String?
+  documentUrl   String?
+  status        String    @default("ACTIVE") // ACTIVE, EXPIRED, TERMINATED
+  createdAt     DateTime  @default(now())
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+}
+
+// -------------------------------------------------------------
+// 5. ORDERS & RECURRING SUPPLY
+// -------------------------------------------------------------
+
+model Order {
+  id                   String      @id @default(uuid())
+  orderNumber          String      @unique
+  customerId           String
+  orderDate            DateTime    @default(now())
+  requiredDeliveryDate DateTime?
+  status               String      @default("CONFIRMED") // DRAFT, CONFIRMED, PREPARING, READY, OUT_FOR_DELIVERY, DELIVERED, PARTIALLY_DELIVERED, CANCELLED
+  paymentStatus        String      @default("PENDING")   // PENDING, PARTIAL, PAID, OVERDUE
+  totalAmount          Float       @default(0.0)
+  amountPaid           Float       @default(0.0)
+  balanceDue           Float       @default(0.0)
+  vehicleId            String?
+  driverId             String?
+  deliveryLocation     String?
+  notes                String?
+  createdBy            String?
+  createdAt            DateTime    @default(now())
+  updatedAt            DateTime    @updatedAt
+
+  customer   Customer    @relation(fields: [customerId], references: [id])
+  items      OrderItem[]
+  deliveries Delivery[]
+  sales      Sale[]
+}
+
+model OrderItem {
+  id        String @id @default(uuid())
+  orderId   String
+  productId String
+  quantity  Int
+  unitPrice Float
+  totalPrice Float
+
+  order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id])
+}
+
+model RecurringOrder {
+  id                 String    @id @default(uuid())
+  customerId         String
+  productId          String
+  quantity           Int       // e.g. 20 bags or 40 bags
+  frequency          String    // DAILY, EVERY_2_DAYS, EVERY_3_DAYS, EVERY_4_DAYS, WEEKLY, BIWEEKLY, MONTHLY, CUSTOM
+  customIntervalDays Int?
+  unitPrice          Float     @default(7.0)
+  startDate          DateTime
+  endDate            DateTime?
+  deliveryDay        String?
+  deliveryLocation   String?
+  isActive           Boolean   @default(true)
+  lastGeneratedDate  DateTime?
+  nextDueDate        DateTime?
+  notes              String?
+  createdAt          DateTime  @default(now())
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+}
+
+// -------------------------------------------------------------
+// 6. SALES & PAYMENTS
+// -------------------------------------------------------------
+
+model Sale {
+  id             String     @id @default(uuid())
+  saleNumber     String     @unique
+  saleDate       DateTime   @default(now())
+  customerId     String
+  orderId        String?
+  totalAmount    Float
+  amountReceived Float      @default(0.0)
+  creditAmount   Float      @default(0.0)
+  paymentMethod  String     @default("CASH") // CASH, MOMO, BANK, CREDIT, SPLIT
+  dueDate        DateTime?
+  salespersonId  String?
+  status         String     @default("COMPLETED") // COMPLETED, VOIDED, REFUNDED
+  voidReason     String?
+  voidedBy       String?
+  notes          String?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  customer    Customer   @relation(fields: [customerId], references: [id])
+  order       Order?     @relation(fields: [orderId], references: [id])
+  salesperson User?      @relation(fields: [salespersonId], references: [id])
+  items       SaleItem[]
+  payments    Payment[]
+}
+
+model SaleItem {
+  id         String @id @default(uuid())
+  saleId     String
+  productId  String
+  quantity   Int
+  unitPrice  Float
+  totalPrice Float
+
+  sale    Sale    @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id])
+}
+
+model Payment {
+  id              String   @id @default(uuid())
+  paymentNumber   String   @unique
+  customerId      String
+  saleId          String?
+  paymentDate     DateTime @default(now())
+  amount          Float
+  paymentMethod   String   // CASH, MOMO, BANK, OTHER
+  paymentType     String   @default("FULL") // FULL, PARTIAL, ADVANCE, CREDIT_SETTLEMENT, REFUND
+  referenceNumber String?
+  accountId       String?  // links to CashAccount, BankAccount, or MomoAccount
+  recordedById    String?
+  receiptUrl      String?
+  notes           String?
+  createdAt       DateTime @default(now())
+
+  customer   Customer @relation(fields: [customerId], references: [id])
+  sale       Sale?    @relation(fields: [saleId], references: [id])
+  recordedBy User?    @relation(fields: [recordedById], references: [id])
+}
+
+// -------------------------------------------------------------
+// 7. DELIVERIES, ROUTES & FLEET
+// -------------------------------------------------------------
+
+model Route {
+  id                 String     @id @default(uuid())
+  code               String     @unique
+  name               String     // e.g., Route 1: Bomfa - Peminase
+  targetCommunities  String     // JSON array or comma separated: Bomfa, Peminase
+  distanceKm         Float?
+  estimatedFuelLitres Float?
+  isActive           Boolean    @default(true)
+
+  deliveries   Delivery[]
+  vehicleTrips VehicleTrip[]
+}
+
+model Delivery {
+  id                       String         @id @default(uuid())
+  deliveryNumber           String         @unique
+  deliveryDate             DateTime       @default(now())
+  customerId               String
+  orderId                  String?
+  routeId                  String?
+  vehicleId                String?
+  driverId                 String?
+  bagsAssigned             Int
+  bagsDelivered            Int            @default(0)
+  departureTime            DateTime?
+  arrivalTime              DateTime?
+  paymentCollected         Float          @default(0.0)
+  creditCreated            Float          @default(0.0)
+  status                   String         @default("SCHEDULED") // SCHEDULED, LOADING, OUT_FOR_DELIVERY, DELIVERED, PARTIALLY_DELIVERED, FAILED, CANCELLED
+  customerConfirmationName String?
+  customerSignatureUrl     String?
+  failureReason            String?
+  notes                    String?
+  createdAt                DateTime       @default(now())
+  updatedAt                DateTime       @updatedAt
+
+  customer Customer       @relation(fields: [customerId], references: [id])
+  order    Order?         @relation(fields: [orderId], references: [id])
+  route    Route?         @relation(fields: [routeId], references: [id])
+  vehicle  Vehicle?       @relation(fields: [vehicleId], references: [id])
+  driver   Employee?      @relation(fields: [driverId], references: [id])
+  items    DeliveryItem[]
+}
+
+model DeliveryItem {
+  id                String @id @default(uuid())
+  deliveryId        String
+  productId         String
+  quantityLoaded    Int
+  quantityDelivered Int    @default(0)
+  quantityReturned  Int    @default(0)
+
+  delivery Delivery @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
+  product  Product  @relation(fields: [productId], references: [id])
+}
+
+model Vehicle {
+  id                    String    @id @default(uuid())
+  registrationNumber    String    @unique // e.g. M-24-AS 1024 or Aboboyaa #1
+  vehicleType           String    @default("ABOBOYAA_TRICYCLE") // ABOBOYAA_TRICYCLE, CARGO_TRUCK, VAN, OTHER
+  makeModel             String?
+  purchaseDate          DateTime?
+  purchaseCost          Float?
+  currentEstimatedValue Float?
+  assignedDriverId      String?
+  currentOdometer       Float     @default(0.0)
+  insuranceExpiry       DateTime?
+  roadworthyExpiry      DateTime?
+  serviceIntervalKm     Float     @default(2000.0)
+  status                String    @default("ACTIVE") // ACTIVE, UNDER_MAINTENANCE, INACTIVE
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  assignedDriver Employee?            @relation("DriverVehicle", fields: [assignedDriverId], references: [id])
+  deliveries     Delivery[]
+  trips          VehicleTrip[]
+  fuelRecords    VehicleFuel[]
+  maintenance    VehicleMaintenance[]
+}
+
+model VehicleTrip {
+  id                 String    @id @default(uuid())
+  tripDate           DateTime  @default(now())
+  vehicleId          String
+  driverId           String?
+  routeId            String?
+  startOdometer      Float
+  endOdometer        Float
+  distanceKm         Float
+  bagsCarried        Int
+  bagsDelivered      Int
+  fuelLitres         Float     @default(0.0)
+  fuelCost           Float     @default(0.0)
+  revenueCollected   Float     @default(0.0)
+  cashCollected      Float     @default(0.0)
+  creditCreated      Float     @default(0.0)
+  fuelCostPerKm      Float     @default(0.0)
+  deliveryCostPerBag Float     @default(0.0)
+  notes              String?
+  createdAt          DateTime  @default(now())
+
+  vehicle Vehicle   @relation(fields: [vehicleId], references: [id])
+  driver  Employee? @relation(fields: [driverId], references: [id])
+  route   Route?    @relation(fields: [routeId], references: [id])
+}
+
+model VehicleFuel {
+  id            String   @id @default(uuid())
+  vehicleId     String
+  date          DateTime @default(now())
+  fuelType      String   @default("PETROL") // PETROL, DIESEL
+  litres        Float
+  pricePerLitre Float
+  totalCost     Float
+  odometer      Float?
+  receiptNumber String?
+  recordedBy    String?
+  notes         String?
+  createdAt     DateTime @default(now())
+
+  vehicle Vehicle @relation(fields: [vehicleId], references: [id])
+}
+
+model VehicleMaintenance {
+  id               String    @id @default(uuid())
+  vehicleId        String
+  date             DateTime  @default(now())
+  serviceType      String    // ROUTINE, REPAIR, TYRES, OIL_CHANGE, ACCIDENT
+  description      String
+  technician       String?
+  partsCost        Float     @default(0.0)
+  laborCost        Float     @default(0.0)
+  totalCost        Float
+  odometer         Float?
+  nextServiceKm    Float?
+  nextServiceDate  DateTime?
+  receiptUrl       String?
+  notes            String?
+  createdAt        DateTime  @default(now())
+
+  vehicle Vehicle @relation(fields: [vehicleId], references: [id])
+}
+
+// -------------------------------------------------------------
+// 8. PRODUCTION, BATCHES, QUALITY & SANITATION
+// -------------------------------------------------------------
+
+model ProductionRun {
+  id                        String    @id @default(uuid())
+  runNumber                 String    @unique
+  date                      DateTime  @default(now())
+  shift                     String    // MORNING_8_12, AFTERNOON_1_5
+  operatorId                String?
+  productId                 String
+  startTime                 DateTime?
+  endTime                   DateTime?
+  machineHours              Float     @default(4.0)
+  openingRawWaterLevel      Float?    // Litres or gauge mark
+  closingRawWaterLevel      Float?
+  openingPurifiedWaterLevel Float?    // Litres
+  closingPurifiedWaterLevel Float?
+  bagsProduced              Int
+  rejectedBags              Int       @default(0)
+  goodBags                  Int       // bagsProduced - rejectedBags
+  rejectRatePct             Float     @default(0.0)
+  productionPerHour         Float     @default(0.0)
+  packagingUsedRolls        Float     @default(0.0)
+  outerBagsUsed             Int       @default(0)
+  downtimeMinutes           Int       @default(0)
+  downtimeReason            String?
+  batchId                   String?
+  qcStatus                  String    @default("PASSED") // PENDING, PASSED, FAILED, CONDITIONAL
+  notes                     String?
+  createdAt                 DateTime  @default(now())
+  updatedAt                 DateTime  @updatedAt
+
+  operator       User?                    @relation(fields: [operatorId], references: [id])
+  product        Product                  @relation(fields: [productId], references: [id])
+  batches        ProductionBatch[]
+  qualityChecks  ProductionQualityCheck[]
+}
+
+model ProductionBatch {
+  id              String   @id @default(uuid())
+  batchNumber     String   @unique // e.g. NSP-2026-09-16-001
+  productionRunId String?
+  productionDate  DateTime @default(now())
+  expiryDate      DateTime // Best before date
+  totalGoodBags   Int
+  remainingBags   Int
+  qcStatus        String   @default("PASSED") // PENDING, PASSED, FAILED
+  notes           String?
+  createdAt       DateTime @default(now())
+
+  productionRun ProductionRun?    @relation(fields: [productionRunId], references: [id])
+  qualityTests  QualityTest[]
+  wasteRecords  ProductionWaste[]
+  complaints    Complaint[]
+}
+
+model ProductionQualityCheck {
+  id              String   @id @default(uuid())
+  productionRunId String
+  checkTime       DateTime @default(now())
+  parameter       String   // SEAL_INTEGRITY, BAG_WEIGHT, WATER_CLARITY, ODOR, TASTE, NET_VOLUME
+  specification   String   // e.g., 500ml +/- 10ml, No leaks, Odorless
+  measuredValue   String
+  passFail        String   @default("PASS") // PASS, FAIL
+  inspectorId     String?
+  notes           String?
+
+  productionRun ProductionRun @relation(fields: [productionRunId], references: [id], onDelete: Cascade)
+}
+
+model QualityTest {
+  id                     String    @id @default(uuid())
+  batchId                String?
+  testDate               DateTime  @default(now())
+  testType               String    // MICROBIOLOGICAL, PHYSICOCHEMICAL, PH, NET_VOLUME, CONDUCTIVITY, OTHER
+  parameter              String    // e.g. pH, E.coli, Coliform, TDS, Turbidity
+  specificationReference String    // GSA / FDA Ghana reference standard
+  result                 String
+  passFail               String    @default("PASS") // PASS, FAIL
+  laboratory             String?   // e.g. KNUST Water Lab, FDA Lab, In-house
+  tester                 String?
+  certificateNumber      String?
+  certificateUrl         String?
+  nextTestDate           DateTime?
+  notes                  String?
+  createdAt              DateTime  @default(now())
+
+  batch ProductionBatch? @relation(fields: [batchId], references: [id])
+}
+
+model CleaningRecord {
+  id            String   @id @default(uuid())
+  date          DateTime @default(now())
+  time          String?
+  checklistJson String   // JSON of items: production room, machine, tanks, treatment, packaging, drainage, hygiene, chemicals
+  completed     Boolean  @default(false)
+  verifiedById  String?
+  photoUrl      String?
+  notes         String?
+  createdAt     DateTime @default(now())
+}
+
+model ProductionWaste {
+  id                  String   @id @default(uuid())
+  date                DateTime @default(now())
+  wasteType           String   // DAMAGED_SACHETS, REJECTED_BAGS, PACKAGING_WASTE, FILTER_RESIDUE
+  quantity            Float
+  unit                String   @default("BAGS") // BAGS, PIECES, KG
+  reason              String?
+  batchId             String?
+  dispositionMethod   String?  // RECYCLED, DISPOSED, REPROCESSED
+  responsiblePersonId String?
+  notes               String?
+  createdAt           DateTime @default(now())
+
+  batch ProductionBatch? @relation(fields: [batchId], references: [id])
+}
+
+model Complaint {
+  id                String    @id @default(uuid())
+  complaintNumber   String    @unique
+  customerId        String?
+  batchId           String?
+  dateReceived      DateTime  @default(now())
+  category          String    // TASTE_SMELL, PACKAGING, SEAL_LEAK, QUANTITY, DELIVERY, CUSTOMER_SERVICE, OTHER
+  severity          String    @default("MEDIUM") // LOW, MEDIUM, HIGH, CRITICAL
+  description       String
+  immediateAction   String?
+  responsiblePerson String?
+  rootCause         String?
+  correctiveAction  String?
+  resolutionDate    DateTime?
+  status            String    @default("OPEN") // OPEN, INVESTIGATING, RESOLVED, CLOSED
+  createdAt         DateTime  @default(now())
+
+  customer Customer?        @relation(fields: [customerId], references: [id])
+  batch    ProductionBatch? @relation(fields: [batchId], references: [id])
+}
+
+// -------------------------------------------------------------
+// 9. INVENTORY & PROCUREMENT
+// -------------------------------------------------------------
+
+model InventoryItem {
+  id              String   @id @default(uuid())
+  itemCode        String   @unique
+  name            String   // Sachet film, Outer bags, Resin, Carbon, Quartz sand, Chemicals, Fuel
+  category        String   // SACHET_FILM, OUTER_BAGS, CHEMICALS, FILTERS, CLEANING, FUEL, SPARE_PARTS, OTHER
+  unit            String   // ROLL, BUNDLE, KG, LITRE, PIECE
+  openingStock    Float    @default(0.0)
+  currentStock    Float    @default(0.0)
+  reorderLevel    Float    @default(10.0)
+  unitCost        Float    @default(0.0)
+  supplierId      String?
+  storageLocation String?
+  notes           String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  supplier     Supplier?              @relation(fields: [supplierId], references: [id])
+  transactions InventoryTransaction[]
+  purchaseItems PurchaseItem[]
+}
+
+model InventoryTransaction {
+  id              String   @id @default(uuid())
+  transactionDate DateTime @default(now())
+  itemId          String
+  transactionType String   // PURCHASE, PRODUCTION_USAGE, DAMAGE, ADJUSTMENT, TRANSFER, RETURN
+  quantity        Float    // positive for additions, negative for usage/damage
+  unitCost        Float    @default(0.0)
+  referenceType   String?  // PURCHASE, PRODUCTION, MANUAL_STOCKTAKE
+  referenceId     String?
+  recordedBy      String?
+  notes           String?
+  createdAt       DateTime @default(now())
+
+  item InventoryItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+}
+
+model Supplier {
+  id               String   @id @default(uuid())
+  supplierCode     String   @unique
+  name             String
+  contactPerson    String?
+  phone            String?
+  email            String?
+  location         String?
+  productsSupplied String?
+  paymentTerms     String?
+  currentBalance   Float    @default(0.0) // what we owe supplier
+  notes            String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  inventoryItems InventoryItem[]
+  purchases      Purchase[]
+}
+
+model Purchase {
+  id             String   @id @default(uuid())
+  purchaseNumber String   @unique
+  supplierId     String
+  purchaseDate   DateTime @default(now())
+  totalAmount    Float
+  paymentStatus  String   @default("PAID") // PAID, UNPAID, PARTIAL
+  receiptNumber  String?
+  invoiceUrl     String?
+  recordedBy     String?
+  notes          String?
+  createdAt      DateTime @default(now())
+
+  supplier Supplier       @relation(fields: [supplierId], references: [id])
+  items    PurchaseItem[]
+}
+
+model PurchaseItem {
+  id         String @id @default(uuid())
+  purchaseId String
+  itemId     String
+  quantity   Float
+  unitPrice  Float
+  totalPrice Float
+
+  purchase Purchase      @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
+  item     InventoryItem @relation(fields: [itemId], references: [id])
+}
+
+// -------------------------------------------------------------
+// 10. FINANCE, CASHBOOK, BANK & MOMO
+// -------------------------------------------------------------
+
+model CashAccount {
+  id             String   @id @default(uuid())
+  name           String   // e.g. Factory Safe, Factory Petty Cash
+  currentBalance Float    @default(0.0)
+  currency       String   @default("GHS")
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+
+  transactions CashTransaction[]
+}
+
+model CashTransaction {
+  id             String   @id @default(uuid())
+  accountId      String
+  date           DateTime @default(now())
+  type           String   // OPENING_BALANCE, CASH_SALE, CREDIT_COLLECTION, OTHER_INCOME, EXPENSE, CASH_DEPOSIT_TO_BANK, CASH_TO_MOMO, OWNER_CONTRIBUTION, OWNER_WITHDRAWAL
+  amount         Float    // positive for in, negative for out
+  runningBalance Float
+  reference      String?
+  payeePayer     String?
+  recordedBy     String?
+  notes          String?
+  createdAt      DateTime @default(now())
+
+  account CashAccount @relation(fields: [accountId], references: [id])
+}
+
+model BankAccount {
+  id             String   @id @default(uuid())
+  bankName       String   // e.g. GCB, Ecobank, Juaben Rural Bank
+  accountNumber  String   @unique
+  branch         String?
+  currentBalance Float    @default(0.0)
+  currency       String   @default("GHS")
+  createdAt      DateTime @default(now())
+
+  transactions BankTransaction[]
+}
+
+model BankTransaction {
+  id            String    @id @default(uuid())
+  bankAccountId String
+  date          DateTime  @default(now())
+  reference     String?
+  description   String
+  moneyIn       Float     @default(0.0)
+  moneyOut      Float     @default(0.0)
+  runningBalance Float
+  isReconciled  Boolean   @default(false)
+  reconciledAt  DateTime?
+  reconciledBy  String?
+  createdAt     DateTime  @default(now())
+
+  bankAccount BankAccount @relation(fields: [bankAccountId], references: [id])
+}
+
+model MomoAccount {
+  id             String   @id @default(uuid())
+  provider       String   // MTN_MOMO, TELECEL_CASH, AT_MONEY
+  phoneNumber    String   @unique
+  registeredName String
+  merchantId     String?
+  currentBalance Float    @default(0.0)
+  createdAt      DateTime @default(now())
+
+  transactions MomoTransaction[]
+}
+
+model MomoTransaction {
+  id              String   @id @default(uuid())
+  momoAccountId   String
+  date            DateTime @default(now())
+  transactionId   String   @unique // Network reference
+  customerId      String?
+  amount          Float
+  chargeFee       Float    @default(0.0)
+  netAmount       Float
+  direction       String   // INCOMING, OUTGOING
+  transactionType String   // CUSTOMER_PAYMENT, EXPENSE, BANK_TRANSFER, CASH_OUT
+  runningBalance  Float
+  notes           String?
+  createdAt       DateTime @default(now())
+
+  momoAccount MomoAccount @relation(fields: [momoAccountId], references: [id])
+}
+
+model Expense {
+  id                String   @id @default(uuid())
+  expenseNumber     String   @unique
+  date              DateTime @default(now())
+  category          String   // PAYROLL, ELECTRICITY, WATER, TREATMENT_CHEMICALS, FILTERS, SACHET_FILM, OUTER_BAGS, PACKAGING, FUEL_PETROL, FUEL_DIESEL, MAINTENANCE, REPAIRS, PHONE_INTERNET, TRANSPORTATION, MARKETING, OFFICE, REGULATORY, LABORATORY_TESTING, CLEANING, VEHICLE_EXPENSES, LOAN_PAYMENTS, BANK_CHARGES, MOMO_CHARGES, OWNER_DRAWINGS, OTHER
+  description       String
+  payee             String
+  amount            Float
+  paymentMethod     String   // CASH, BANK, MOMO
+  accountType       String?  // CASH, BANK, MOMO
+  accountId         String?
+  receiptNumber     String?
+  receiptUrl        String?
+  approvedBy        String?
+  recordedBy        String?
+  isOwnerWithdrawal Boolean  @default(false)
+  notes             String?
+  createdAt         DateTime @default(now())
+}
+
+// -------------------------------------------------------------
+// 11. EMPLOYEES & PAYROLL
+// -------------------------------------------------------------
+
+model Employee {
+  id                 String    @id @default(uuid())
+  employeeCode       String    @unique
+  fullName           String
+  roleTitle          String    // Packaging Worker, Cleaner, Driver, Supervisor
+  phone              String?
+  emergencyContact   String?
+  hireDate           DateTime?
+  basicMonthlySalary Float     @default(1000.0) // approx GH₵1,000
+  paymentMethod      String    @default("CASH") // CASH, MOMO, BANK
+  momoOrBankDetails  String?
+  status             String    @default("ACTIVE") // ACTIVE, ON_LEAVE, TERMINATED
+  notes              String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  assignedVehicles Vehicle[]     @relation("DriverVehicle")
+  trips            VehicleTrip[]
+  deliveries       Delivery[]
+  attendance       Attendance[]
+  payrollRecords   Payroll[]
+}
+
+model Attendance {
+  id         String    @id @default(uuid())
+  date       DateTime  @default(now())
+  employeeId String
+  timeIn     DateTime?
+  timeOut    DateTime?
+  status     String    @default("PRESENT") // PRESENT, LATE, HALF_DAY, ABSENT, EXCUSED
+  notes      String?
+  createdAt  DateTime  @default(now())
+
+  employee Employee @relation(fields: [employeeId], references: [id])
+}
+
+model Payroll {
+  id               String    @id @default(uuid())
+  payrollMonth     String    // YYYY-MM
+  employeeId       String
+  basicSalary      Float
+  allowances       Float     @default(0.0)
+  deductions       Float     @default(0.0)
+  netPay           Float
+  paymentStatus    String    @default("UNPAID") // UNPAID, PAID
+  paymentDate      DateTime?
+  paymentMethod    String    @default("CASH")
+  paymentReference String?
+  recordedBy       String?
+  createdAt        DateTime  @default(now())
+
+  employee Employee @relation(fields: [employeeId], references: [id])
+}
+
+// -------------------------------------------------------------
+// 12. PLANT ASSETS, MAINTENANCE & LOANS
+// -------------------------------------------------------------
+
+model Asset {
+  id                        String    @id @default(uuid())
+  assetCode                 String    @unique
+  name                      String    // Borehole, Water Treatment Plant, Sachet Machine, Purified Water Tank, Generator, Aboboyaa
+  category                  String    // LAND, FACTORY_BUILDING, TREATMENT_PLANT, FILTRATION_EQUIPMENT, SACHET_MACHINE, STORAGE_TANKS, GENERATOR, VEHICLE, OFFICE_EQUIPMENT, OTHER_MACHINERY
+  acquisitionDate           DateTime?
+  originalCost              Float?
+  currentEstimatedValue     Float?
+  isProfessionallyAppraised Boolean   @default(false)
+  appraisalDocumentUrl      String?
+  serialNumber              String?
+  location                  String?   @default("Adumasa Factory")
+  condition                 String    @default("GOOD") // EXCELLENT, GOOD, FAIR, POOR, OUT_OF_SERVICE
+  ownershipDocumentUrl      String?
+  notes                     String?
+  createdAt                 DateTime  @default(now())
+  updatedAt                 DateTime  @updatedAt
+
+  maintenanceRecords AssetMaintenance[]
+}
+
+model AssetMaintenance {
+  id             String    @id @default(uuid())
+  assetId        String
+  date           DateTime  @default(now())
+  problem        String
+  workPerformed  String
+  technician     String?
+  partsReplaced  String?
+  cost           Float     @default(0.0)
+  downtimeHours  Float     @default(0.0)
+  nextServiceDate DateTime?
+  invoiceUrl     String?
+  notes          String?
+  createdAt      DateTime  @default(now())
+
+  asset Asset @relation(fields: [assetId], references: [id])
+}
+
+model Loan {
+  id                    String    @id @default(uuid())
+  loanCode              String    @unique
+  lenderName            String    // Bank, Private, Microfinance
+  purpose               String?
+  originalPrincipal     Float     // e.g. GH₵30,000 when confirmed by management
+  currentBalance        Float
+  interestRatePct       Float     @default(0.0)
+  startDate             DateTime?
+  maturityDate          DateTime?
+  installmentAmount     Float?
+  paymentFrequency      String?   @default("MONTHLY")
+  nextPaymentDate       DateTime?
+  collateralDetails     String?
+  agreementDocumentUrl  String?
+  status                String    @default("ACTIVE") // ACTIVE, FULLY_PAID, DEFAULTED
+  isManagementConfirmed Boolean   @default(false) // GH₵30,000 entered as liability only when confirmed
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  payments LoanPayment[]
+}
+
+model LoanPayment {
+  id              String   @id @default(uuid())
+  loanId          String
+  paymentDate     DateTime @default(now())
+  principalPaid   Float
+  interestPaid    Float    @default(0.0)
+  totalPaid       Float
+  paymentMethod   String   @default("BANK")
+  accountId       String?
+  referenceNumber String?
+  remainingBalance Float
+  recordedBy      String?
+  createdAt       DateTime @default(now())
+
+  loan Loan @relation(fields: [loanId], references: [id])
+}
+
+// -------------------------------------------------------------
+// 13. DOCUMENTS & VERSIONING
+// -------------------------------------------------------------
+
+model Document {
+  id                String    @id @default(uuid())
+  documentCode      String    @unique
+  title             String    // Business Registration, FDA, GSA, EPA, Fire Permit, Environmental Health
+  category          String    // BUSINESS_REGISTRATION, FDA, GSA, EPA, OPERATING_PERMIT, ENVIRONMENTAL_HEALTH, FIRE, WATER_LAB_REPORT, COA, QUALITY_RECORD, SUPPLIER_DOC, CUSTOMER_AGREEMENT, EMPLOYEE_DOC, VEHICLE_DOC, INSURANCE, LOAN_DOC, LAND_TITLE, ASSET_INVOICE, TAX_DOC, BANK_DOC, SOP, OTHER
+  documentNumber    String?
+  issueDate         DateTime?
+  expiryDate        DateTime?
+  relatedEntityType String?   // CUSTOMER, VEHICLE, EMPLOYEE, ASSET, SUPPLIER, LOAN
+  relatedEntityId   String?
+  currentVersionId  String?
+  status            String    @default("ACTIVE") // ACTIVE, EXPIRED, ARCHIVED
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  versions DocumentVersion[]
+}
+
+model DocumentVersion {
+  id                String   @id @default(uuid())
+  documentId        String
+  versionNumber     Int      @default(1)
+  fileName          String
+  filePath          String
+  fileSize          Int
+  mimeType          String
+  changeDescription String?
+  uploadedBy        String?
+  uploadDate        DateTime @default(now())
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+}
+
+// -------------------------------------------------------------
+// 14. AUDIT TRAIL & NOTIFICATIONS
+// -------------------------------------------------------------
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  timestamp  DateTime @default(now())
+  userId     String?
+  action     String   // CREATE, UPDATE, DELETE, VOID, APPROVE, LOGIN, EXPORT
+  module     String   // sales, production, finance, inventory, users, etc.
+  recordId   String?
+  oldValue   String?  // JSON string
+  newValue   String?  // JSON string
+  ipAddress  String?
+  userAgent  String?
+
+  user User? @relation(fields: [userId], references: [id])
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String?  // null for all managers/owners
+  type      String   // OVERDUE_CREDIT, LOW_INVENTORY, VEHICLE_SERVICE, DOCUMENT_EXPIRY, QUALITY_TEST_DUE, LOAN_DUE, RECURRING_ORDER_DUE, DELIVERY_OVERDUE
+  title     String
+  message   String
+  linkUrl   String?
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id])
+}
