@@ -28,3 +28,34 @@ jobs:
       - run: npm run test:safe --prefix backend
       - run: npm run test:upgrade --prefix backend
       - run: npm test --prefix frontend
+
+  postgres:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_DB: nsupure_ci
+          POSTGRES_USER: nsupure_test
+          POSTGRES_PASSWORD: disposable-ci-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U nsupure_test -d nsupure_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://nsupure_test:disposable-ci-only@localhost:5432/nsupure_ci
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci --prefix backend
+      - run: npm run db:provider --prefix backend
+      - run: npm run prisma:generate --prefix backend
+      - run: npm run build --prefix backend
+      - run: node backend/scripts/test-postgres.cjs
