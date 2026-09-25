@@ -1,0 +1,30 @@
+name: Build and data-safety checks
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: npm ci --prefix backend
+      - run: npm ci --prefix frontend
+      - run: npm run prisma:generate --prefix backend
+      - run: npm run build --prefix backend
+      - run: npm run build --prefix frontend
+      - run: npm run test:safe --prefix backend
+      - run: npm run test:upgrade --prefix backend
+      - run: npm test --prefix frontend

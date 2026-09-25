@@ -1,0 +1,74 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { once } from "node:events";
+import { randomUUID } from "node:crypto";
+import { app } from "../../src/app.js";
+import { prisma } from "../../src/utils/prisma.js";
+
+test("production correction, conflict detection, soft deletion, history and role protection", async () => {
+  assert.equal(process.env.NODE_ENV, "test", "Only run against a disposable database");
+  const server = app.listen(0, "127.0.0.1"); await once(server, "listening");
+  const address = server.address() as { port: number };
+  const base = `http://127.0.0.1:${address.port}/api/v1`;
+  let token = "";
+  async function request(path: string, method = "GET", body?: unknown, extraHeaders: Record<string, string> = {}) {
+    const response = await fetch(base + path, { method, headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}`, ...extraHeaders }, body: body === undefined ? undefined : JSON.stringify(body) });
+    return { status: response.status, body: await response.json() };
+  }
+  try {
+    token = (await request("/auth/login", "POST", { username: "owner", password: "Nsupure2025!" })).body.data.token;
+    const product = await prisma.product.create({ data: { code: `TEST-${randomUUID()}`, name: "Isolated correction product", unit: "BAGS", defaultPrice: 7 } });
+    const input = { productId: product.id, shift: "NIGHT", date: "2026-01-05", startTime: "22:00", endTime: "04:00", machineHours: 6, downtimeMinutes: 60, bagsProduced: 100, rejectedBags: 2, packagingUsedRolls: 0, outerBagsUsed: 0, openingRawWaterLevel: 0 };
+    const key = randomUUID();
+    const created = await request("/production/runs", "POST", input, { "Idempotency-Key": key });
+    assert.equal(created.status, 201, JSON.stringify(created.body));
+    const run = created.body.data.run; const batch = created.body.data.batch;
+    const replay = await request("/production/runs", "POST", input, { "Idempotency-Key": key });
+    assert.equal(replay.status, 200); assert.equal(replay.body.data.run.id, run.id);
+    assert.equal((await request("/production/runs", "POST", { ...input, bagsProduced: 110 }, { "Idempotency-Key": key })).status, 409);
+    assert.equal(run.qcStatus, "PENDING"); assert.equal(run.openingRawWaterLevel, 0); assert.equal(run.machineHours, 5);
+    const updated = await request(`/production/runs/${run.id}`, "PUT", { ...input, bagsProduced: 110, reason: "Corrected paper shift total", expectedVersion: 1 });
+    assert.equal(updated.status, 200, JSON.stringify(updated.body)); assert.equal(updated.body.data.run.goodBags, 108);
+    assert.equal(updated.body.data.batch.remainingBags, 108); assert.equal(updated.body.data.batch.id, batch.id);
+    const conflict = await request(`/production/runs/${run.id}`, "PUT", { ...input, expectedVersion: 1, reason: "Stale submission" });
+    assert.equal(conflict.status, 409);
+    const deleted = await request(`/production/runs/${run.id}/void`, "POST", { expectedVersion: 2, reason: "Duplicate handwritten entry" });
+    assert.equal(deleted.status, 200, JSON.stringify(deleted.body));
+    const stored = await prisma.productionRun.findUniqueOrThrow({ where: { id: run.id } });
+    assert.equal(stored.goodBags, 108); assert.ok(stored.voidedAt);
+    assert.ok(!(await request("/production/runs")).body.data.runs.some((row: { id: string }) => row.id === run.id));
+    assert.ok((await request("/production/runs?includeVoided=true")).body.data.runs.some((row: { id: string }) => row.id === run.id));
+    assert.equal((await request(`/production/runs/${run.id}/history`)).body.data.history.length, 3);
+    const month = await request("/reports/monthly-management?year=2026&month=1");
+    assert.equal(month.body.data.currentMonth.goodBagsProduced, 0, "Deleted production excluded from monthly totals");
+    const waste = await prisma.productionWaste.findMany({ where: { batchId: batch.id } });
+    assert.equal(waste.reduce((total, row) => total + row.quantity, 0, ), 0, "Original waste and signed correction retained");
+    assert.equal((await request(`/production/runs/${run.id}/void`, "POST", { expectedVersion: 3, reason: "Repeated deletion" })).status, 409);
+    assert.equal((await request("/quality/cleaning", "POST", { checklist: {} })).status, 400);
+    const restored = await request(`/production/runs/${run.id}/restore`, "POST", { expectedVersion: 3, reason: "Confirmed original shift exists" });
+    assert.equal(restored.status, 200); assert.equal(restored.body.data.run.goodBags, 108);
+    assert.equal(restored.body.data.run.voidedAt, null); assert.equal(restored.body.data.run.qcStatus, "PENDING");
+    assert.equal((await request(`/production/runs/${run.id}/restore`, "POST", { expectedVersion: 3, reason: "Duplicate restore request" })).status, 409);
+    const qcRun = (await request("/production/runs", "POST", input)).body.data;
+    assert.equal((await request(`/quality/batches/${qcRun.batch.id}/release`, "POST", { reason: "Review complete" })).status, 409);
+    await request("/settings", "PUT", { settings: { qc_required_test_types: "PH,NET_VOLUME" } });
+    const evidence = { batchId: qcRun.batch.id, testType: "PH", parameter: "pH", specificationReference: "Factory approved procedure", result: "Measured test value", passFail: "PASS" };
+    await request("/quality/tests", "POST", evidence);
+    assert.equal((await request(`/quality/batches/${qcRun.batch.id}/release`, "POST", { reason: "Review complete" })).status, 409);
+    await request("/quality/tests", "POST", { ...evidence, testType: "NET_VOLUME", parameter: "Net volume" });
+    assert.equal((await request(`/quality/batches/${qcRun.batch.id}/release`, "POST", { reason: "Review complete" })).status, 200);
+    await request("/quality/tests", "POST", { ...evidence, passFail: "FAIL" });
+    assert.equal((await prisma.productionBatch.findUniqueOrThrow({ where: { id: qcRun.batch.id } })).qcStatus, "FAILED");
+    assert.equal((await request(`/quality/batches/${qcRun.batch.id}/release`, "POST", { reason: "Review complete" })).status, 409);
+    const customer = await prisma.customer.findFirstOrThrow();
+    await prisma.sale.create({ data: { saleNumber: `TEST-${randomUUID()}`, customerId: customer.id, totalAmount: 7, items: { create: { productId: product.id, quantity: 1, unitPrice: 7, totalPrice: 7 } } } });
+    const latest = await prisma.productionRun.findUniqueOrThrow({ where: { id: qcRun.run.id } });
+    const blocked = await request(`/production/runs/${latest.id}/void`, "POST", { expectedVersion: latest.version, reason: "Downstream sale exists" });
+    assert.equal(blocked.status, 409); assert.equal(blocked.body.error.code, "STOCK_REVIEW_REQUIRED");
+    assert.equal((await request(`/production/runs/${latest.id}`, "PUT", { ...input, notes: "Shift record notes corrected", reason: "Correct supervisor notes", expectedVersion: latest.version })).status, 200);
+    const viewer = await prisma.user.create({ data: { username: `viewer-${randomUUID()}`, email: `${randomUUID()}@test.invalid`, fullName: "Read Only", passwordHash: (await prisma.user.findUniqueOrThrow({ where: { username: "owner" } })).passwordHash, userRoles: { create: { role: { connect: { code: "VIEWER" } } } } } });
+    token = (await request("/auth/login", "POST", { username: viewer.username, password: "Nsupure2025!" })).body.data.token;
+    assert.equal((await request("/production/runs", "POST", input)).status, 403);
+    assert.equal((await request(`/production/runs/${run.id}/void`, "POST", { expectedVersion: 3, reason: "Unauthorized delete" })).status, 403);
+  } finally { await new Promise<void>((resolve) => server.close(() => resolve())); await prisma.$disconnect(); }
+});

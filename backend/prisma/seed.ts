@@ -29,11 +29,15 @@ async function main() {
   const defaultPassword = process.env.INITIAL_OWNER_PASSWORD || "Nsupure2025!";
   const defaultEmail = process.env.INITIAL_OWNER_EMAIL || "owner@nsupure.com";
   const defaultFullName = process.env.INITIAL_OWNER_NAME || "Nsupure Managing Proprietor";
-  const passwordHash = await bcrypt.hash(defaultPassword, 12);
+  const existingOwner = await prisma.user.findUnique({ where: { username: defaultOwnerUsername } });
+  if (!existingOwner && process.env.NODE_ENV === "production" && (!process.env.INITIAL_OWNER_PASSWORD || defaultPassword === "Nsupure2025!")) {
+    throw new Error("Set a unique INITIAL_OWNER_PASSWORD before initializing production.");
+  }
+  const passwordHash = existingOwner?.passwordHash || await bcrypt.hash(defaultPassword, 12);
 
   const ownerUser = await prisma.user.upsert({
     where: { username: defaultOwnerUsername },
-    update: { passwordHash, fullName: defaultFullName, email: defaultEmail },
+    update: {}, // Never overwrite an existing owner during initialization.
     create: {
       username: defaultOwnerUsername,
       email: defaultEmail,
@@ -120,7 +124,7 @@ async function main() {
   for (const s of coreSettings) {
     await prisma.setting.upsert({
       where: { key: s.key },
-      update: { value: s.value },
+      update: {}, // Preserve settings changed by management.
       create: {
         key: s.key,
         value: s.value,

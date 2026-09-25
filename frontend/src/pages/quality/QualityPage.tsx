@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { ShieldCheck, CheckCircle2, AlertTriangle, Plus, Sparkles, MessageSquare } from "lucide-react";
 import { apiRequest } from "../../services/api.ts";
+import { BatchQualityPanel } from "../../components/common/BatchQualityPanel.tsx";
 import { SANITATION_AREAS } from "../../config/constants.ts";
 
 interface QualityTest {
@@ -28,17 +29,7 @@ interface Complaint {
 export const QualityPage: React.FC = () => {
   const [tests, setTests] = useState<QualityTest[]>([]);
   const [complaints, setComplaints] = useState<Complaint[]>([]);
-  const [checklist, setChecklist] = useState<Record<string, boolean>>({
-    "Production Room": true,
-    "Filling & Sealing Machine": true,
-    "Storage & Purified Tanks": true,
-    "Water Treatment & Filtration System": true,
-    "Packaging & Bagging Area": true,
-    "Floor & Walls": true,
-    "Drainage & Waste Disposal": true,
-    "Staff Handwashing & Personal Hygiene": true,
-    "Cleaning Chemical Dilution & Safety": true,
-  });
+  const [checklist, setChecklist] = useState<Record<string, boolean>>(Object.fromEntries(SANITATION_AREAS.map(area => [area, false])));
   const [cleaningSubmitted, setCleaningSubmitted] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -81,6 +72,7 @@ export const QualityPage: React.FC = () => {
 
   return (
     <div className="space-y-6 max-w-5xl mx-auto">
+      <BatchQualityPanel />
       {/* Title */}
       <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm flex justify-between items-center">
         <div>

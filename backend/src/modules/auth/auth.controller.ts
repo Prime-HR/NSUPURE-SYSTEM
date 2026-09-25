@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import bcrypt from "bcryptjs";
+import { createHash } from "node:crypto";
 import jwt from "jsonwebtoken";
 import { z } from "zod";
 import { prisma } from "../../utils/prisma.js";
@@ -85,6 +86,7 @@ export async function login(req: Request, res: Response, next: NextFunction): Pr
     const token = jwt.sign(
       {
         userId: user.id,
+        credentialVersion: createHash("sha256").update(user.passwordHash).digest("hex"),
         username: user.username,
         roles,
       },
@@ -244,6 +246,7 @@ export async function updateProfile(req: Request, res: Response, next: NextFunct
     const token = jwt.sign(
       {
         userId: updated.id,
+        credentialVersion: createHash("sha256").update(updated.passwordHash).digest("hex"),
         username: updated.username,
         roles,
       },
@@ -471,7 +474,7 @@ export async function deleteUser(req: Request, res: Response, next: NextFunction
         success: true,
         action: "SUSPENDED",
         message: `User account ${user.username} has recorded sales/production/payment records and was suspended to preserve audit and accounting integrity.`,
-        data: { user: suspended },
+        data: { user: { id: suspended.id, username: suspended.username, status: suspended.status } },
         timestamp: new Date().toISOString(),
       });
       return;
@@ -538,7 +541,7 @@ export async function toggleUserStatus(req: Request, res: Response, next: NextFu
 
     res.json({
       success: true,
-      data: { user: updated },
+      data: { user: { id: updated.id, username: updated.username, status: updated.status } },
       message: `User ${user.username} status updated to ${status}.`,
       timestamp: new Date().toISOString(),
     });

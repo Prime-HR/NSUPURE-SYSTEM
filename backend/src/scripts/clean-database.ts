@@ -5,6 +5,9 @@ import { BUSINESS_INFO, SYSTEM_ROLES } from "../config/constants.js";
 const prisma = new PrismaClient();
 
 export async function cleanDatabase() {
+  if (process.env.NODE_ENV !== "test" || process.env.ALLOW_TEST_DATA_RESET !== "DELETE_TEST_DATA") {
+    throw new Error("Database reset is restricted to explicitly authorized disposable test databases.");
+  }
   console.log("=================================================");
   console.log("  NSUPURE SYSTEM: CLEANING TEST/TRANSACTION DATA ");
   console.log("=================================================");

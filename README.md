@@ -1,4 +1,6 @@
 # NSUPURE BUSINESS MANAGEMENT SYSTEM
+
+> Production correction upgrade: read [safe rollout instructions](docs/SAFE-ROLLOUT.md) before deployment. The [implementation programme](docs/IMPROVEMENT-PROGRAMME.md) distinguishes completed work from remaining improvements. Existing databases must be backed up and restore-tested before the additive upgrade.
 **Operational Backbone for Sachet Water Manufacturing & Distribution**
 
 **Enterprise:** NSUPURE MINERAL WATER ENTERPRISE  
