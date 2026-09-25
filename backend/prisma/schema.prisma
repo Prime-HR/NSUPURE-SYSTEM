@@ -28,6 +28,7 @@ model User {
   sales         Sale[]
   productionRuns ProductionRun[]
   payments      Payment[]
+  mobileSyncEvents MobileSyncEvent[]
 }
 
 model Role {
@@ -1007,6 +1008,29 @@ model AuditLog {
   userAgent  String?
 
   user User? @relation(fields: [userId], references: [id])
+}
+
+// Append-only events from the installable NSUPURE field app. The payload is
+// intentionally stored as text so the schema works for both SQLite tests and
+// PostgreSQL production. Business records are reconciled by the app layer;
+// this table provides durable, deduplicated transport and an audit source.
+model MobileSyncEvent {
+  id          String   @id @default(uuid())
+  deviceId    String
+  eventId     String
+  entity      String
+  entityId    String
+  action      String
+  payload     String
+  occurredAt  DateTime
+  receivedAt  DateTime @default(now())
+  userId      String
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@unique([deviceId, eventId])
+  @@index([receivedAt])
+  @@index([entity, entityId])
 }
 
 model Notification {

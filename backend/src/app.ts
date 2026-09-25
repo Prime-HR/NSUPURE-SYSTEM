@@ -26,6 +26,7 @@ import { dashboardRoutes } from "./modules/dashboard/dashboard.routes.js";
 import { reportRoutes } from "./modules/reports/reports.routes.js";
 import { searchRoutes } from "./modules/search/search.routes.js";
 import { auditRoutes } from "./modules/audit/audit.routes.js";
+import { mobileSyncRoutes } from "./modules/mobile-sync/mobile-sync.routes.js";
 
 export const app = express();
 // Render terminates TLS at its reverse proxy. Do not trust arbitrary forwarding chains.
@@ -96,6 +97,7 @@ const mountRoutes = (prefix: string) => {
   app.use(`${prefix}/reports`, reportRoutes);
   app.use(`${prefix}/search`, searchRoutes);
   app.use(`${prefix}/audit`, auditRoutes);
+  app.use(`${prefix}/mobile-sync`, mobileSyncRoutes);
 };
 
 mountRoutes("/api/v1");
