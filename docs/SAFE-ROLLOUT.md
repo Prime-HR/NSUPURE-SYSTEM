@@ -4,7 +4,7 @@ This branch is the first implementation stage, not completion of the full improv
 
 ## Verified recovery status
 
-On 25 September 2026, the authenticated Render dashboard reported suspension because the free usage allowance was exhausted. The existing database is Neon PostgreSQL and remained readable. A private, checksum-protected application export was restored and compared successfully. Native PostgreSQL backup executables were blocked by local Windows application-control policy; that restriction was respected. Provider-side staging, uploaded-file reconciliation and live release checks remain outstanding. No hosting plan, live schema or deployment was changed.
+On 25 September 2026, the authenticated Render dashboard reported suspension because the free usage allowance was exhausted. The existing database is Neon PostgreSQL and remained readable. A private, checksum-protected application export was restored and compared successfully. Native PostgreSQL backup executables were blocked by local Windows application-control policy; that restriction was respected. Provider-side staging, uploaded-file reconciliation and live release checks remain outstanding. No hosting plan, live schema or deployment was changed. The existing Render dashboard build command still invokes prisma:deploy and prisma:seed; replace it with the reviewed build-only command and explicitly disable automatic deployment before any release. Repository blueprint changes alone do not update these settings.
 
 ## Render recovery first
 
@@ -72,4 +72,4 @@ npm run test:upgrade --prefix backend
 npm test --prefix frontend
 ```
 
-The safe runner creates a fresh SQLite database per test file and overrides inherited database settings. Upgrade rehearsal checks all 55 tables, old values, repeated migration, exact backup restoration and rejection of invalid backup evidence. These local checks do not verify the suspended live service or the PostgreSQL path; rehearse that path on the actual provider before deployment.
+The safe runner creates a fresh SQLite database per test file and overrides inherited database settings. Upgrade rehearsal checks all 55 tables, old values, repeated migration, exact backup restoration and rejection of invalid backup evidence. GitHub CI also passed integration tests against a disposable PostgreSQL 18 service, using a unique schema per test file. These checks do not verify the suspended live service or its provider-specific migration/deployment path; rehearse that path on the actual provider before deployment.

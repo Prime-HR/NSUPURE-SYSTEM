@@ -18,7 +18,7 @@ User authorized the whole recommendation programme, with no data loss and produc
 | Cost and margin reporting | Not implemented | Verified allocations, material/power/labour/waste costs, route/customer margins; distinguish estimates from booked amounts |
 | Maintenance / purchasing | Existing records need workflow extensions | Service schedules, reorder points, supplier lead times, purchasing approvals and notifications |
 | Owner action dashboard | Existing dashboard; production void exclusion added | Operational exceptions tied to reliable underlying ledgers and assigned follow-up |
-| CI / operations | Build, SQLite tests and upgrade checks added | PostgreSQL CI, dependency/security scanning, production telemetry, restore drills, controlled releases and rollback rehearsals |
+| CI / operations | Build, SQLite tests, upgrade checks and isolated PostgreSQL 18 integration CI passed | Dependency/security scanning, production telemetry, restore drills, controlled releases and rollback rehearsals |
 | Forecasting / anomaly detection | Deferred until data quality is established | Backtest against verified historical data, confidence/error reporting, human approval for operational changes |
 
 Do not merge or deploy this foundation as if all programme items are complete. Continue with the stock/payment reconciliation design once the live database is recovered and backed up. No production merge, deployment, purchase or database migration was performed while creating this branch.
