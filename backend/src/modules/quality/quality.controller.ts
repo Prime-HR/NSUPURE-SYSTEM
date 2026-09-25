@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from "express";
 import { z } from "zod";
 import { prisma } from "../../utils/prisma.js";
 import { AppError } from "../../middleware/error-handler.js";
+import { SANITATION_AREAS } from "../../config/constants.js";
 import { logAudit } from "../../middleware/audit.js";
 
 export const recordQualityTestSchema = z.object({
@@ -19,7 +20,7 @@ export const recordQualityTestSchema = z.object({
 });
 
 export const recordCleaningSchema = z.object({
-  checklist: z.record(z.boolean()), // { productionRoom: true, machine: true, tanks: true, ... }
+  checklist: z.record(z.boolean()).refine(value => SANITATION_AREAS.every(area => typeof value[area] === "boolean"), "All nine sanitation checkpoints are required"), // { productionRoom: true, machine: true, tanks: true, ... }
   notes: z.string().optional(),
   photoUrl: z.string().optional(),
 });
@@ -65,29 +66,24 @@ export async function recordQualityTest(req: Request, res: Response, next: NextF
   try {
     const data = req.body;
 
-    const test = await prisma.qualityTest.create({
-      data: {
-        batchId: data.batchId || null,
-        testType: data.testType,
-        parameter: data.parameter,
-        specificationReference: data.specificationReference,
-        result: data.result,
-        passFail: data.passFail,
-        laboratory: data.laboratory || null,
-        tester: data.tester || req.user?.username || null,
+    const test = await prisma.$transaction(async tx => {
+      const batch = data.batchId ? await tx.productionBatch.findUnique({ where: { id: data.batchId } }) : null;
+      if (data.batchId && (!batch || batch.voidedAt)) throw new AppError("Select an active production batch.", 400, "INVALID_BATCH");
+      const test = await tx.qualityTest.create({ data: {
+        batchId: data.batchId || null, testType: data.testType, parameter: data.parameter,
+        specificationReference: data.specificationReference, result: data.result, passFail: data.passFail,
+        laboratory: data.laboratory || null, tester: req.user!.username,
         certificateNumber: data.certificateNumber || null,
-        nextTestDate: data.nextTestDate ? new Date(data.nextTestDate) : null,
-        notes: data.notes || null,
-      },
-      include: { batch: true },
-    });
-
-    await logAudit({
-      action: "CREATE",
-      module: "quality",
-      recordId: test.id,
-      newValue: test,
-      req,
+        nextTestDate: data.nextTestDate ? new Date(data.nextTestDate) : null, notes: data.notes || null,
+      }, include: { batch: true } });
+      if (batch) {
+        // Any new evidence withdraws release until reviewed; a failure quarantines.
+        const qcStatus = data.passFail === "FAIL" ? "FAILED" : "PENDING";
+        await tx.productionBatch.update({ where: { id: batch.id }, data: { qcStatus } });
+        if (batch.productionRunId) await tx.productionRun.update({ where: { id: batch.productionRunId }, data: { qcStatus, version: { increment: 1 } } });
+      }
+      await tx.auditLog.create({ data: { userId: req.user!.id, action: "CREATE", module: "quality", recordId: test.id, newValue: JSON.stringify(test) } });
+      return test;
     });
 
     res.status(201).json({
@@ -126,7 +122,7 @@ export async function recordCleaning(req: Request, res: Response, next: NextFunc
     const { checklist, notes, photoUrl } = req.body;
 
     // Verify all standard sanitation checkpoints are checked
-    const allCompleted = Object.values(checklist).every((val) => val === true);
+    const allCompleted = SANITATION_AREAS.every(area => checklist[area] === true);
 
     const record = await prisma.cleaningRecord.create({
       data: {
@@ -264,4 +260,29 @@ export async function resolveComplaint(req: Request, res: Response, next: NextFu
   } catch (error) {
     next(error);
   }
+}
+
+export const releaseBatchSchema = z.object({ reason: z.string().trim().min(5).max(1000) });
+export async function releaseBatch(req: Request, res: Response, next: NextFunction) {
+  try {
+    const batch = await prisma.$transaction(async tx => {
+      const existing = await tx.productionBatch.findUnique({ where: { id: req.params.id }, include: { qualityTests: { orderBy: { testDate: "desc" } }, productionRun: true } });
+      if (!existing || existing.voidedAt) throw new AppError("Active batch not found", 404, "NOT_FOUND");
+      const config = await tx.setting.findUnique({ where: { key: "qc_required_test_types" } });
+      const required = config?.value.split(",").map(value => value.trim()).filter(Boolean);
+      if (!required?.length) throw new AppError("Management must configure qc_required_test_types before batches can be released.", 409, "QC_POLICY_REQUIRED");
+      const lastCorrection = existing.productionRunId ? await tx.auditLog.findFirst({ where: { module: "production", recordId: existing.productionRunId, action: "UPDATE" }, orderBy: { timestamp: "desc" } }) : null;
+      const tests = existing.qualityTests.filter(test => !lastCorrection || test.testDate >= lastCorrection.timestamp);
+      const latest = new Map<string, typeof tests[number]>();
+      for (const test of tests) if (!latest.has(`${test.testType}:${test.parameter.trim().toLowerCase()}`)) latest.set(`${test.testType}:${test.parameter.trim().toLowerCase()}`, test);
+      if (required.some(type => !Array.from(latest.values()).some(test => test.testType === type && test.passFail === "PASS")) || Array.from(latest.values()).some(test => test.passFail !== "PASS")) {
+        throw new AppError("All required test types must have passing results after the latest production correction.", 409, "QC_INCOMPLETE");
+      }
+      const updated = await tx.productionBatch.update({ where: { id: existing.id }, data: { qcStatus: "PASSED" } });
+      if (existing.productionRunId) await tx.productionRun.update({ where: { id: existing.productionRunId }, data: { qcStatus: "PASSED", version: { increment: 1 } } });
+      await tx.auditLog.create({ data: { userId: req.user!.id, action: "APPROVE", module: "quality", recordId: updated.id, oldValue: JSON.stringify({ qcStatus: existing.qcStatus }), newValue: JSON.stringify({ qcStatus: "PASSED", reason: req.body.reason, required, testIds: Array.from(latest.values()).map(test => test.id) }) } });
+      return updated;
+    }, { isolationLevel: "Serializable" });
+    res.json({ success: true, data: { batch }, timestamp: new Date().toISOString() });
+  } catch (error) { next(error); }
 }

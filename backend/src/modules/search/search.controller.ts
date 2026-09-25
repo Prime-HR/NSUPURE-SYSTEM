@@ -71,6 +71,7 @@ export async function globalSearch(req: Request, res: Response, next: NextFuncti
       prisma.productionBatch.findMany({
         where: {
           batchNumber: { contains: query },
+          voidedAt: null,
         },
         take: 5,
       }),

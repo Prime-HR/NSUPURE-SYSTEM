@@ -19,9 +19,11 @@ import { authenticate } from "../../middleware/auth.js";
 import { requireRoles } from "../../middleware/rbac.js";
 import { validateBody } from "../../middleware/validation.js";
 
+import { limitLogin } from "../../middleware/login-limit.js";
+
 const router = Router();
 
-router.post("/login", validateBody(loginSchema), login);
+router.post("/login", limitLogin, validateBody(loginSchema), login);
 router.get("/me", authenticate, getMe);
 router.put("/profile", authenticate, validateBody(updateProfileSchema), updateProfile);
 router.post("/change-password", authenticate, validateBody(changePasswordSchema), changePassword);

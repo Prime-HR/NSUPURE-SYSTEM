@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
+import { createHash } from "node:crypto";
 import { ENV } from "../config/env.js";
 import { AppError } from "./error-handler.js";
 import { prisma } from "../utils/prisma.js";
@@ -33,7 +34,7 @@ export async function authenticate(req: Request, res: Response, next: NextFuncti
   const token = authHeader.split(" ")[1];
 
   try {
-    const decoded = jwt.verify(token, ENV.JWT_SECRET) as { userId: string };
+    const decoded = jwt.verify(token, ENV.JWT_SECRET) as { userId: string; credentialVersion?: string };
 
     const user = await prisma.user.findUnique({
       where: { id: decoded.userId },
@@ -59,6 +60,10 @@ export async function authenticate(req: Request, res: Response, next: NextFuncti
       return;
     }
 
+    if (decoded.credentialVersion !== createHash("sha256").update(user.passwordHash).digest("hex")) {
+      next(new AppError("Please sign in again. Your session is no longer valid.", 401, "SESSION_REVOKED"));
+      return;
+    }
     const roles = user.userRoles.map((ur) => ur.role.code);
     const permissionsSet = new Set<string>();
 

@@ -1,6 +1,15 @@
 import dotenv from "dotenv";
 
 dotenv.config();
+if (process.env.NODE_ENV === "production") {
+  const secret = process.env.JWT_SECRET || "";
+  if (secret.length < 32 || /nsupure_.*(secret|2025)/i.test(secret)) {
+    throw new Error("Production requires a unique JWT_SECRET of at least 32 characters.");
+  }
+  if (!/^postgres(ql)?:\/\//.test(process.env.DATABASE_URL || "")) {
+    throw new Error("Production requires persistent PostgreSQL storage; local SQLite is not allowed.");
+  }
+}
 
 export const ENV = {
   PORT: parseInt(process.env.PORT || "5000", 10),

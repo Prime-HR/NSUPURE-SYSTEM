@@ -1,6 +1,6 @@
 import { Router } from "express";
 import {
-  getQualityTests,
+  getQualityTests, releaseBatch, releaseBatchSchema,
   recordQualityTest,
   getCleaningRecords,
   recordCleaning,
@@ -15,11 +15,15 @@ import {
 import { authenticate } from "../../middleware/auth.js";
 import { validateBody } from "../../middleware/validation.js";
 
+import { requireRoles } from "../../middleware/rbac.js";
+
 const router = Router();
+const qualityEditors = requireRoles("OWNER", "ADMINISTRATOR", "MANAGER", "PRODUCTION_SUPERVISOR");
+router.post("/batches/:id/release", authenticate, qualityEditors, validateBody(releaseBatchSchema), releaseBatch);
 
 // Quality tests
 router.get("/tests", authenticate, getQualityTests);
-router.post("/tests", authenticate, validateBody(recordQualityTestSchema), recordQualityTest);
+router.post("/tests", authenticate, qualityEditors, validateBody(recordQualityTestSchema), recordQualityTest);
 
 // Sanitation checklist (accessible via /cleaning or /sanitation)
 router.get("/cleaning", authenticate, getCleaningRecords);

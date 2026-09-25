@@ -2,6 +2,9 @@ import express from "express";
 import cors from "cors";
 import helmet from "helmet";
 import path from "path";
+import { authenticate } from "./middleware/auth.js";
+import { prisma } from "./utils/prisma.js";
+import { ENV } from "./config/env.js";
 import { errorHandler } from "./middleware/error-handler.js";
 import { authRoutes } from "./modules/auth/auth.routes.js";
 import { settingsRoutes } from "./modules/settings/settings.routes.js";
@@ -25,6 +28,8 @@ import { searchRoutes } from "./modules/search/search.routes.js";
 import { auditRoutes } from "./modules/audit/audit.routes.js";
 
 export const app = express();
+// Render terminates TLS at its reverse proxy. Do not trust arbitrary forwarding chains.
+if (process.env.RENDER === "true") app.set("trust proxy", 1);
 
 // Security HTTP Headers
 app.use(
@@ -37,7 +42,10 @@ app.use(
 // Cross-Origin Resource Sharing
 app.use(
   cors({
-    origin: true, // Allow frontend dev & network access
+    origin(origin, callback) {
+      const allowed = (process.env.CORS_ORIGINS || ENV.FRONTEND_URL).split(",").map(value => value.trim());
+      callback(null, !origin || allowed.includes(origin));
+    },
     credentials: true,
   })
 );
@@ -48,7 +56,13 @@ app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
 // Static Document & Receipt Storage
 const uploadDir = process.env.UPLOAD_DIR || "./uploads";
-app.use("/uploads", express.static(path.resolve(uploadDir)));
+app.use("/uploads", authenticate, express.static(path.resolve(uploadDir)));
+
+// Readiness checks persistent storage without exposing its configuration.
+app.get("/ready", async (_req, res) => {
+  try { await prisma.$queryRaw`SELECT 1`; res.json({ status: "ready" }); }
+  catch { res.status(503).json({ status: "unavailable" }); }
+});
 
 // System Health Probe
 app.get("/health", (req, res) => {

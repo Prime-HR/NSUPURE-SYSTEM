@@ -38,6 +38,12 @@ export async function getAllSettings(req: Request, res: Response, next: NextFunc
 export async function updateSettings(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     const { settings } = req.body;
+    if (settings.qc_required_test_types !== undefined) {
+      const types = settings.qc_required_test_types.split(",").map((value: string) => value.trim());
+      const allowed = ["MICROBIOLOGICAL", "PHYSICOCHEMICAL", "PH", "NET_VOLUME", "CONDUCTIVITY", "OTHER"];
+      if (!types.length || types.some((type: string) => !allowed.includes(type))) throw new AppError("Select supported required quality test types.", 400, "INVALID_QC_POLICY");
+      settings.qc_required_test_types = Array.from(new Set(types)).join(",");
+    }
 
     const updatedKeys: string[] = [];
     for (const [key, value] of Object.entries(settings)) {

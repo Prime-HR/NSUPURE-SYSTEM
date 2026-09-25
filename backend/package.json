@@ -12,9 +12,12 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:push": "prisma db push",
-    "prisma:deploy": "node scripts/set-db-provider.js && prisma generate && prisma db push",
+    "prisma:deploy": "node scripts/upgrade-production.cjs",
     "prisma:seed": "tsx prisma/seed.ts",
-    "test": "tsx --test tests/**/*.test.ts"
+    "test": "tsx --test tests/**/*.test.ts",
+    "db:backup": "python scripts/backup_database.py",
+    "test:safe": "node scripts/test-isolated.cjs",
+    "test:upgrade": "node scripts/test-upgrade.cjs"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",

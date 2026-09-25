@@ -39,8 +39,8 @@ export async function getMonthlyManagementReport(req: Request, res: Response, ne
       complaints,
       qualityTests,
     ] = await Promise.all([
-      prisma.productionRun.findMany({ where: { date: { gte: startOfMonth, lte: endOfMonth } } }),
-      prisma.productionRun.findMany({ where: { date: { gte: prevStartOfMonth, lte: prevEndOfMonth } } }),
+      prisma.productionRun.findMany({ where: { voidedAt: null, date: { gte: startOfMonth, lte: endOfMonth } } }),
+      prisma.productionRun.findMany({ where: { voidedAt: null, date: { gte: prevStartOfMonth, lte: prevEndOfMonth } } }),
       prisma.sale.findMany({
         where: { saleDate: { gte: startOfMonth, lte: endOfMonth }, status: "COMPLETED" },
         include: { items: true },
@@ -189,7 +189,7 @@ export async function getInvestorReport(req: Request, res: Response, next: NextF
       qualityTests,
       documents,
     ] = await Promise.all([
-      prisma.productionRun.findMany(),
+      prisma.productionRun.findMany({ where: { voidedAt: null } }),
       prisma.sale.findMany({ where: { status: "COMPLETED" }, include: { items: true } }),
       prisma.expense.findMany({ where: { isOwnerWithdrawal: false } }),
       prisma.customer.findMany(),

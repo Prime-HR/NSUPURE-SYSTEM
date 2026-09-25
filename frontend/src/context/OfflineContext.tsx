@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from "react";
-import { flushOfflineQueue } from "../services/api.ts";
+import { flushOfflineQueue, pendingOfflineCount } from "../services/api.ts";
 
 export type NetworkStatus = "ONLINE" | "OFFLINE" | "SYNCING" | "SYNC_ERROR";
 
@@ -13,15 +13,8 @@ const OfflineContext = createContext<OfflineContextType | undefined>(undefined);
 
 export const OfflineProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [status, setStatus] = useState<NetworkStatus>(navigator.onLine ? "ONLINE" : "OFFLINE");
-  const [pendingCount, setPendingCount] = useState<number>(() => {
-    const q = localStorage.getItem("nsupure_offline_queue");
-    return q ? JSON.parse(q).length : 0;
-  });
-
-  const updatePendingCount = () => {
-    const q = localStorage.getItem("nsupure_offline_queue");
-    setPendingCount(q ? JSON.parse(q).length : 0);
-  };
+  const [pendingCount, setPendingCount] = useState<number>(pendingOfflineCount);
+  const updatePendingCount = () => setPendingCount(pendingOfflineCount());
 
   const triggerSync = async () => {
     if (!navigator.onLine) return;
@@ -31,6 +24,7 @@ export const OfflineProvider: React.FC<{ children: React.ReactNode }> = ({ child
       updatePendingCount();
       setStatus("ONLINE");
     } catch {
+      updatePendingCount();
       setStatus("SYNC_ERROR");
     }
   };

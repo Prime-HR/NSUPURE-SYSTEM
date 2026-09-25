@@ -26,3 +26,10 @@ uploads/*
 .DS_Store
 Thumbs.db
 *.log
+
+# Private recovery artifacts
+*.dump
+*.sqlite
+*.db-wal
+*.db-shm
+backups/

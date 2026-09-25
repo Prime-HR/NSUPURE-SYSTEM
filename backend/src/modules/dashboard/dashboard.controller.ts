@@ -23,7 +23,7 @@ export async function getDashboardOverview(req: Request, res: Response, next: Ne
       inventoryItems,
     ] = await Promise.all([
       prisma.productionRun.findMany({
-        where: { date: { gte: today, lte: endOfToday } },
+        where: { voidedAt: null, date: { gte: today, lte: endOfToday } },
       }),
       prisma.sale.findMany({
         where: { saleDate: { gte: today, lte: endOfToday }, status: "COMPLETED" },
@@ -68,7 +68,7 @@ export async function getDashboardOverview(req: Request, res: Response, next: Ne
     // MONTH METRICS (Section 14)
     const [monthRuns, monthSales, monthExpenses] = await Promise.all([
       prisma.productionRun.findMany({
-        where: { date: { gte: firstDayOfMonth, lte: endOfToday } },
+        where: { voidedAt: null, date: { gte: firstDayOfMonth, lte: endOfToday } },
       }),
       prisma.sale.findMany({
         where: { saleDate: { gte: firstDayOfMonth, lte: endOfToday }, status: "COMPLETED" },

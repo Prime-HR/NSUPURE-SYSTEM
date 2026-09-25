@@ -473,6 +473,11 @@ model VehicleMaintenance {
 
 model ProductionRun {
   id                        String    @id @default(uuid())
+  version                   Int       @default(1)
+  requestId                 String?   @unique
+  requestHash               String?
+  voidedAt                  DateTime?
+  voidReason                String?
   runNumber                 String    @unique
   date                      DateTime  @default(now())
   shift                     String    // MORNING_8_12, AFTERNOON_1_5
@@ -508,6 +513,7 @@ model ProductionRun {
 
 model ProductionBatch {
   id              String   @id @default(uuid())
+  voidedAt        DateTime?
   batchNumber     String   @unique // e.g. NSP-2026-09-16-001
   productionRunId String?
   productionDate  DateTime @default(now())
